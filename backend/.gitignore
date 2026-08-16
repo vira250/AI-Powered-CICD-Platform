@@ -1,0 +1,16 @@
+# Environment Variables
+.env
+*.env
+*.pem
+
+# Build output & targets
+target/
+*.jar
+*.war
+
+# IDE files
+.idea/
+*.iml
+.classpath
+.project
+.settings/
