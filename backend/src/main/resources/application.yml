@@ -1,0 +1,44 @@
+server:
+  port: ${PORT:8080}
+  address: ${HOST:0.0.0.0}
+
+spring:
+  application:
+    name: ai-cicd-platform-backend
+  jpa:
+    hibernate:
+      ddl-auto: update
+  jackson:
+    default-property-inclusion: non_null
+
+app:
+  environment: ${ENVIRONMENT:development}
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  agents-url: ${AGENTS_URL:http://localhost:8000}
+  session-secret: ${SESSION_SECRET:${GITHUB_CLIENT_SECRET:change-me}}
+
+  github:
+    app-id: ${GITHUB_APP_ID:}
+    app-slug: ${GITHUB_APP_SLUG:}
+    client-id: ${GITHUB_CLIENT_ID:}
+    client-secret: ${GITHUB_CLIENT_SECRET:}
+    webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
+    private-key-path: ${GITHUB_PRIVATE_KEY_PATH:}
+    oauth-callback-url: ${OAUTH_CALLBACK_URL:http://localhost:8080/api/auth/callback}
+    api-base: https://api.github.com
+
+  postgres:
+    host: ${PG_HOST:localhost}
+    port: ${PG_PORT:5432}
+    user: ${PG_USER:postgres}
+    password: ${PG_PASSWORD:postgres}
+    login-db: ${PG_LOGIN_DB:login_db}
+    repo-db: ${PG_REPO_DB:repo_db}
+
+  ngrok:
+    enabled: ${NGROK_ENABLED:false}
+    authtoken: ${NGROK_AUTHTOKEN:}
+
+logging:
+  level:
+    com.aicicd: INFO
