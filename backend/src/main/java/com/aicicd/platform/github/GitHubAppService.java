@@ -90,4 +90,14 @@ public class GitHubAppService {
                 new CachedToken(token, Instant.now().plus(55, ChronoUnit.MINUTES)));
         return token;
     }
+
+    /** Lists all installations of this GitHub App */
+    @SuppressWarnings("unchecked")
+    public java.util.List<Map<String, Object>> listInstallations() {
+        return http.get()
+                .uri("/app/installations")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + createAppJwt())
+                .retrieve()
+                .body(java.util.List.class);
+    }
 }

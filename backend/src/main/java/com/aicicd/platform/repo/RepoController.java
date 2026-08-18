@@ -49,6 +49,42 @@ public class RepoController {
         return github.listInstallationRepos(token);
     }
 
+    // ---- auto-discover all installations of this GitHub App -------------
+    @GetMapping("/installations")
+    public List<Map<String, Object>> listInstallations() {
+        try {
+            return appService.listInstallations();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    // ---- auto-discover all repositories across all installations --------
+    @GetMapping("/auto-available")
+    public List<Map<String, Object>> autoAvailable() {
+        List<Map<String, Object>> allRepos = new java.util.ArrayList<>();
+        try {
+            List<Map<String, Object>> installations = appService.listInstallations();
+            if (installations != null) {
+                for (Map<String, Object> inst : installations) {
+                    if (inst.get("id") instanceof Number num) {
+                        long instId = num.longValue();
+                        String token = appService.installationToken(instId);
+                        List<Map<String, Object>> reposList = github.listInstallationRepos(token);
+                        for (Map<String, Object> r : reposList) {
+                            java.util.Map<String, Object> copy = new java.util.HashMap<>(r);
+                            copy.put("installationId", instId);
+                            allRepos.add(copy);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // log error
+        }
+        return allRepos;
+    }
+
     // ---- repos already saved in our DB -----------------------------------
     @GetMapping
     public List<ConnectedRepository> connected() {

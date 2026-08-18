@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import api from '../api.js'
 
 export default function Dashboard() {
+  const [params] = useSearchParams()
   const [connected, setConnected] = useState([])
   const [installationId, setInstallationId] = useState('')
+  const [installations, setInstallations] = useState([])
   const [available, setAvailable] = useState([])
+  const [loadingRepos, setLoadingRepos] = useState(false)
   const [busy, setBusy] = useState(null)
   const [message, setMessage] = useState('')
   const [health, setHealth] = useState(null)
@@ -20,26 +23,67 @@ export default function Dashboard() {
     }
   }, [])
 
+  // Auto-discover installations and available repos from GitHub App
+  const autoDiscover = useCallback(async () => {
+    setLoadingRepos(true)
+    try {
+      // 1. Fetch available repos directly across all installations
+      const { data: repos } = await api.get('/repos/auto-available')
+      if (repos && repos.length > 0) {
+        setAvailable(repos)
+        if (repos[0].installationId) {
+          setInstallationId(String(repos[0].installationId))
+        }
+      }
+
+      // 2. Fetch installations
+      const { data: insts } = await api.get('/repos/installations')
+      if (insts && insts.length > 0) {
+        setInstallations(insts)
+      }
+    } catch (e) {
+      console.log('Auto discovery error:', e)
+    } finally {
+      setLoadingRepos(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadConnected()
+    autoDiscover()
     api.get('/health').then(({ data }) => setHealth(data)).catch(() => {})
     api.get('/auth/me').then(({ data }) => { if (data.authenticated) setUser(data) }).catch(() => {})
-  }, [loadConnected])
+  }, [loadConnected, autoDiscover])
+
+  // If URL contains installation_id parameter after installing app
+  useEffect(() => {
+    const instId = params.get('installation_id') || params.get('installationId')
+    if (instId) {
+      setInstallationId(instId)
+      api.get('/repos/available', { params: { installationId: instId } })
+        .then(({ data }) => setAvailable(data))
+        .catch(() => {})
+    }
+  }, [params])
 
   const loadAvailable = async () => {
     if (!installationId) return
+    setLoadingRepos(true)
     try {
       const { data } = await api.get('/repos/available', { params: { installationId } })
       setAvailable(data)
     } catch (e) {
       setMessage(`Error loading repos for installation ID ${installationId}: ${e.response?.data?.error || e.message}`)
+    } finally {
+      setLoadingRepos(false)
     }
   }
 
   const connect = async (repo) => {
+    const effectiveInstId = repo.installationId || installationId
     try {
       await api.post('/repos/connect', {
-        installationId: Number(installationId),
+        installationId: Number(effectiveInstId),
         owner: repo.owner.login,
         name: repo.name,
         fullName: repo.full_name,
@@ -92,32 +136,10 @@ export default function Dashboard() {
           <div className="hero-badge">Step 1</div>
           <h3>Install GitHub App</h3>
           <p>
-            Connect your GitHub repositories to enable automated AI workflow generation, code reviews, and log analysis.
+            Authorize our GitHub App (<code>nexus-pipe</code>) to connect your repositories. Our backend will automatically detect your installations.
           </p>
-          <div className="steps-grid">
-            <div className="step-item">
-              <span className="step-num">1</span>
-              <div>
-                <strong>Install App on GitHub</strong>
-                <p>Grant permission to access your target repositories.</p>
-              </div>
-            </div>
-            <div className="step-item">
-              <span className="step-num">2</span>
-              <div>
-                <strong>Copy Installation ID</strong>
-                <p>Note the numeric ID at the end of the redirect URL (e.g. <code>6948271</code>).</p>
-              </div>
-            </div>
-            <div className="step-item">
-              <span className="step-num">3</span>
-              <div>
-                <strong>Connect Repository</strong>
-                <p>Paste the Installation ID below to list & connect your repos.</p>
-              </div>
-            </div>
-          </div>
-          <div className="action-row">
+
+          <div className="action-row" style={{ marginTop: '16px' }}>
             <a
               href={githubInstallUrl}
               target="_blank"
@@ -129,27 +151,27 @@ export default function Dashboard() {
               </svg>
               Install GitHub App on GitHub ↗
             </a>
+            <button className="btn ghost" onClick={autoDiscover} style={{ marginLeft: '12px' }}>
+              🔄 Refresh Repositories
+            </button>
           </div>
         </div>
       </section>
 
-      {/* Connect Repos Section */}
+      {/* Discovered & Available Repositories */}
       <section className="card" id="repos">
-        <h3>Step 2: Connect a repository</h3>
-        <div className="row connect-input-row">
-          <input
-            type="number"
-            placeholder="Enter GitHub App Installation ID (e.g. 6948271)"
-            value={installationId}
-            onChange={(e) => setInstallationId(e.target.value)}
-            className="installation-input"
-          />
-          <button className="btn primary" onClick={loadAvailable} disabled={!installationId}>
-            List Repositories
-          </button>
+        <div className="row spread">
+          <h3>Step 2: Available Repositories</h3>
+          {installations.length > 0 && (
+            <span className="muted" style={{ fontSize: '13px' }}>
+              Found {installations.length} active installation(s)
+            </span>
+          )}
         </div>
 
-        {available.length > 0 && (
+        {loadingRepos && <p className="muted">Fetching available repositories from GitHub App…</p>}
+
+        {available.length > 0 ? (
           <div className="table-responsive">
             <table>
               <thead><tr><th>Repository</th><th>Default Branch</th><th>Action</th></tr></thead>
@@ -157,13 +179,35 @@ export default function Dashboard() {
                 {available.map((r) => (
                   <tr key={r.id}>
                     <td><strong>{r.full_name}</strong></td>
-                    <td><code>{r.default_branch}</code></td>
-                    <td><button className="btn primary" onClick={() => connect(r)}>Connect</button></td>
+                    <td><code>{r.default_branch || 'main'}</code></td>
+                    <td>
+                      <button className="btn primary" onClick={() => connect(r)}>
+                        + Connect Repo
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        ) : (
+          !loadingRepos && (
+            <div style={{ padding: '16px 0' }}>
+              <p className="muted">No repositories auto-discovered yet. If you have an Installation ID, enter it below or install the GitHub App above.</p>
+              <div className="row connect-input-row" style={{ marginTop: '12px' }}>
+                <input
+                  type="number"
+                  placeholder="Installation ID (e.g. 6948271)"
+                  value={installationId}
+                  onChange={(e) => setInstallationId(e.target.value)}
+                  className="installation-input"
+                />
+                <button className="btn primary" onClick={loadAvailable} disabled={!installationId}>
+                  List Repositories
+                </button>
+              </div>
+            </div>
+          )
         )}
       </section>
 
@@ -193,7 +237,7 @@ export default function Dashboard() {
                 </tr>
               ))}
               {connected.length === 0 && (
-                <tr><td colSpan="3" className="muted text-center" style={{ padding: '24px' }}>No repositories connected yet. Install the GitHub App above to get started.</td></tr>
+                <tr><td colSpan="3" className="muted text-center" style={{ padding: '24px' }}>No repositories connected yet. Connect a repository above to begin generating AI CI/CD workflows.</td></tr>
               )}
             </tbody>
           </table>
