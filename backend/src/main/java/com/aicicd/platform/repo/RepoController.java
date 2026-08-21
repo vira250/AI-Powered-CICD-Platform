@@ -212,11 +212,14 @@ public class RepoController {
         pipeline.setPushedAt(Instant.now());
         pipelines.save(pipeline);
 
-        return ResponseEntity.ok(Map.of(
-                "pipelineId", pipeline.getId(),
-                "status", pipeline.getStatus().name(),
-                "stack", output.get("stack"),
-                "templateUsed", pipeline.getTemplateUsed(),
-                "workflowPath", pipeline.getWorkflowPath()));
+        Map<String, Object> respMap = new java.util.HashMap<>();
+        respMap.put("pipelineId", pipeline.getId());
+        respMap.put("status", pipeline.getStatus().name());
+        respMap.put("stack", output.get("stack"));
+        respMap.put("templateUsed", pipeline.getTemplateUsed());
+        respMap.put("workflowPath", pipeline.getWorkflowPath());
+        respMap.put("creditsUsed", pipeline.getCreditsUsed());
+        respMap.put("totalTokens", pipeline.getTotalTokens());
+        return ResponseEntity.ok(respMap);
     }
 }

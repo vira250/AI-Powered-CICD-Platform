@@ -137,9 +137,10 @@ export default function Dashboard() {
     setMessage('')
     try {
       const { data } = await api.post(`/repos/${repo.id}/generate-pipeline`)
+      const costStr = data.creditsUsed != null ? `$${Number(data.creditsUsed).toFixed(5)}` : 'Free'
+      const tokensStr = data.totalTokens ? ` · ${data.totalTokens} tokens` : ''
       setMessage(
-        `Pipeline ${data.status} for ${repo.fullName} ` +
-        `(stack: ${data.stack?.language}/${data.stack?.build_tool}, template: ${data.templateUsed})`,
+        `🎉 Pipeline #${data.pipelineId} ${data.status} for ${repo.fullName} (${data.templateUsed}) — Cost: ${costStr}${tokensStr}`,
       )
       await loadPipelines()
     } catch (e) {

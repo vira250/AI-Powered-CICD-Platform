@@ -43,40 +43,55 @@ public class PipelineController {
     @GetMapping("/pipelines")
     public List<Map<String, Object>> listAllPipelines() {
         return pipelines.findAll().stream()
-                .map(p -> Map.<String, Object>of(
-                        "id", p.getId(),
-                        "repositoryId", p.getRepository().getId(),
-                        "repositoryFullName", p.getRepository().getFullName(),
-                        "workflowPath", p.getWorkflowPath() != null ? p.getWorkflowPath() : "",
-                        "templateUsed", p.getTemplateUsed() != null ? p.getTemplateUsed() : "",
-                        "status", p.getStatus().name(),
-                        "createdAt", p.getCreatedAt().toString()))
+                .map(p -> {
+                    Map<String, Object> map = new java.util.HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("repositoryId", p.getRepository().getId());
+                    map.put("repositoryFullName", p.getRepository().getFullName());
+                    map.put("workflowPath", p.getWorkflowPath() != null ? p.getWorkflowPath() : "");
+                    map.put("templateUsed", p.getTemplateUsed() != null ? p.getTemplateUsed() : "");
+                    map.put("status", p.getStatus().name());
+                    map.put("creditsUsed", p.getCreditsUsed() != null ? p.getCreditsUsed() : 0.0);
+                    map.put("totalTokens", p.getTotalTokens() != null ? p.getTotalTokens() : 0);
+                    map.put("createdAt", p.getCreatedAt().toString());
+                    return map;
+                })
                 .toList();
     }
 
     @GetMapping("/repos/{repoId}/pipelines")
     public List<Map<String, Object>> listPipelines(@PathVariable Long repoId) {
         return pipelines.findByRepositoryIdOrderByCreatedAtDesc(repoId).stream()
-                .map(p -> Map.<String, Object>of(
-                        "id", p.getId(),
-                        "workflowPath", p.getWorkflowPath() != null ? p.getWorkflowPath() : "",
-                        "templateUsed", p.getTemplateUsed() != null ? p.getTemplateUsed() : "",
-                        "status", p.getStatus().name(),
-                        "createdAt", p.getCreatedAt().toString(),
-                        "stackJson", p.getStackJson() != null ? p.getStackJson() : "{}"))
+                .map(p -> {
+                    Map<String, Object> map = new java.util.HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("workflowPath", p.getWorkflowPath() != null ? p.getWorkflowPath() : "");
+                    map.put("templateUsed", p.getTemplateUsed() != null ? p.getTemplateUsed() : "");
+                    map.put("status", p.getStatus().name());
+                    map.put("createdAt", p.getCreatedAt().toString());
+                    map.put("stackJson", p.getStackJson() != null ? p.getStackJson() : "{}");
+                    map.put("creditsUsed", p.getCreditsUsed() != null ? p.getCreditsUsed() : 0.0);
+                    map.put("totalTokens", p.getTotalTokens() != null ? p.getTotalTokens() : 0);
+                    return map;
+                })
                 .toList();
     }
 
     @GetMapping("/pipelines/{id}")
     public ResponseEntity<?> getPipeline(@PathVariable Long id) {
         return pipelines.findById(id)
-                .<ResponseEntity<?>>map(p -> ResponseEntity.ok(Map.of(
-                        "id", p.getId(),
-                        "status", p.getStatus().name(),
-                        "workflowPath", String.valueOf(p.getWorkflowPath()),
-                        "templateUsed", String.valueOf(p.getTemplateUsed()),
-                        "workflowYaml", String.valueOf(p.getWorkflowYaml()),
-                        "stackJson", String.valueOf(p.getStackJson()))))
+                .<ResponseEntity<?>>map(p -> {
+                    Map<String, Object> map = new java.util.HashMap<>();
+                    map.put("id", p.getId());
+                    map.put("status", p.getStatus().name());
+                    map.put("workflowPath", String.valueOf(p.getWorkflowPath()));
+                    map.put("templateUsed", String.valueOf(p.getTemplateUsed()));
+                    map.put("workflowYaml", String.valueOf(p.getWorkflowYaml()));
+                    map.put("stackJson", String.valueOf(p.getStackJson()));
+                    map.put("creditsUsed", p.getCreditsUsed() != null ? p.getCreditsUsed() : 0.0);
+                    map.put("totalTokens", p.getTotalTokens() != null ? p.getTotalTokens() : 0);
+                    return ResponseEntity.ok(map);
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 

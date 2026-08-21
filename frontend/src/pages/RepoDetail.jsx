@@ -52,7 +52,9 @@ export default function RepoDetail() {
     setMessage('')
     try {
       const { data } = await api.post(`/repos/${id}/generate-pipeline`)
-      setMessage(`🎉 Pipeline generated and pushed to GitHub! Template: ${data.templateUsed}`)
+      const costStr = data.creditsUsed != null ? `$${Number(data.creditsUsed).toFixed(5)}` : 'Free'
+      const tokensStr = data.totalTokens ? ` · ${data.totalTokens} tokens` : ''
+      setMessage(`🎉 Pipeline #${data.pipelineId} generated & pushed to GitHub! (${data.templateUsed}) — Cost: ${costStr}${tokensStr}`)
       await load()
     } catch (e) {
       setMessage(`Pipeline generation failed: ${e.response?.data?.error || e.message}`)
@@ -61,10 +63,21 @@ export default function RepoDetail() {
     }
   }
 
+  const totalCost = pipelines.reduce((sum, p) => sum + (p.creditsUsed || 0), 0)
+  const totalTokens = pipelines.reduce((sum, p) => sum + (p.totalTokens || 0), 0)
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 id="pipelines" style={{ margin: 0 }}>Pipelines</h2>
+        <div>
+          <h2 id="pipelines" style={{ margin: 0 }}>Pipelines</h2>
+          {pipelines.length > 0 && (
+            <div className="muted" style={{ fontSize: '13px', marginTop: '4px' }}>
+              Total Generation Cost: <strong style={{ color: '#10b981' }}>${totalCost.toFixed(5)}</strong>
+              {totalTokens > 0 && ` · ${totalTokens.toLocaleString()} tokens`}
+            </div>
+          )}
+        </div>
         <button className="btn primary" disabled={busy === 'generating'} onClick={generatePipeline}>
           {busy === 'generating' ? '⚡ Generating AI Pipeline…' : '⚡ Generate Pipeline'}
         </button>
@@ -72,21 +85,40 @@ export default function RepoDetail() {
       {message && <p className="notice">{message}</p>}
       <section className="card">
         <table>
-          <thead><tr><th>#</th><th>Template</th><th>Stack</th><th>Status</th><th>Cost</th><th>Created</th><th /></tr></thead>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Template</th>
+              <th>Stack</th>
+              <th>Status</th>
+              <th>Cost & Usage</th>
+              <th>Created</th>
+              <th />
+            </tr>
+          </thead>
           <tbody>
             {pipelines.map((p) => (
               <tr key={p.id}>
-                <td>{p.id}</td>
+                <td><strong>#{p.id}</strong></td>
                 <td>{p.templateUsed}</td>
                 <td><code>{p.stackJson}</code></td>
                 <td><span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span></td>
-                <td>{p.creditsUsed ? `$${p.creditsUsed.toFixed(5)}` : '—'}</td>
+                <td>
+                  <div style={{ fontWeight: '600', color: p.creditsUsed > 0 ? '#10b981' : 'inherit' }}>
+                    {p.creditsUsed != null ? `$${p.creditsUsed.toFixed(5)}` : '—'}
+                  </div>
+                  {p.totalTokens != null && p.totalTokens > 0 && (
+                    <div className="muted" style={{ fontSize: '11px' }}>
+                      {p.totalTokens.toLocaleString()} tokens
+                    </div>
+                  )}
+                </td>
                 <td>{new Date(p.createdAt).toLocaleString()}</td>
                 <td><button className="btn" onClick={() => showYaml(p.id)}>View YAML</button></td>
               </tr>
             ))}
             {pipelines.length === 0 && (
-              <tr><td colSpan="7" className="muted">No pipelines yet — use “Generate Pipeline” on the dashboard.</td></tr>
+              <tr><td colSpan="7" className="muted">No pipelines yet — use “Generate Pipeline” to generate an AI CI/CD workflow.</td></tr>
             )}
           </tbody>
         </table>

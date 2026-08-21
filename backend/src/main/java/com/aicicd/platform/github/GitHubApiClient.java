@@ -330,12 +330,14 @@ public class GitHubApiClient {
         String owner = parts.length > 0 ? parts[0] : "";
         String repoName = parts.length > 1 ? parts[1] : fullName;
 
-        context.put("repository", Map.of(
-                "owner", owner,
-                "repositoryName", repoName,
-                "branch", targetBranch,
-                "commitSha", commitSha != null ? commitSha : ""
-        ));
+        Map<String, Object> repoMetadata = new java.util.HashMap<>();
+        repoMetadata.put("githubRepositoryId", 0L);
+        repoMetadata.put("owner", owner);
+        repoMetadata.put("repositoryName", repoName);
+        repoMetadata.put("branch", targetBranch);
+        repoMetadata.put("commitSha", commitSha != null ? commitSha : "");
+
+        context.put("repository", repoMetadata);
         context.put("structure", structure);
         context.put("files", files);
         context.put("totalBytes", totalBytes);
