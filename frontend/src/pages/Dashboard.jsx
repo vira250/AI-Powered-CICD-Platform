@@ -110,6 +110,28 @@ export default function Dashboard() {
     }
   }
 
+  const removeRepo = async (repo) => {
+    const name = repo.fullName || repo.full_name || 'this repository'
+    if (!window.confirm(`Are you sure you want to remove "${name}" from connected repositories?`)) {
+      return
+    }
+    const repoId = repo.id || connected.find(c => c.fullName === (repo.full_name || repo.fullName))?.id
+    if (!repoId) return
+
+    setBusy(repoId)
+    setMessage('')
+    try {
+      await api.delete(`/repos/${repoId}`)
+      setMessage(`Removed "${name}" from connected repositories.`)
+      await loadConnected()
+      await loadPipelines()
+    } catch (e) {
+      setMessage(`Failed to remove repository: ${e.response?.data?.error || e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const generatePipeline = async (repo) => {
     setBusy(repo.id)
     setMessage('')
@@ -301,6 +323,15 @@ export default function Dashboard() {
                             >
                               View
                             </Link>
+                            <button
+                              className="btn danger ghost"
+                              disabled={busy === connectedRepo?.id}
+                              onClick={() => removeRepo(connectedRepo)}
+                              style={{ padding: '6px 12px', fontSize: '13px' }}
+                              title="Disconnect repository"
+                            >
+                              🗑️ Remove
+                            </button>
                           </div>
                         ) : (
                           <button
@@ -384,7 +415,7 @@ export default function Dashboard() {
                         <span className="muted" style={{ fontSize: '13px' }}>None</span>
                       )}
                     </td>
-                    <td className="row">
+                    <td className="row" style={{ gap: '8px' }}>
                       <button
                         className="btn primary"
                         disabled={busy === r.id}
@@ -394,6 +425,15 @@ export default function Dashboard() {
                       </button>
                       <Link className="btn ghost" to={`/repos/${r.id}`}>Pipelines</Link>
                       <Link className="btn ghost" to={`/repos/${r.id}/deployments`}>Deployments</Link>
+                      <button
+                        className="btn danger"
+                        disabled={busy === r.id}
+                        onClick={() => removeRepo(r)}
+                        style={{ padding: '8px 14px', fontSize: '13px' }}
+                        title="Remove repository from connected list"
+                      >
+                        🗑️ Remove
+                      </button>
                     </td>
                   </tr>
                 )

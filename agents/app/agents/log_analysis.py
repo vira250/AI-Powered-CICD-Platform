@@ -118,10 +118,11 @@ class LogAnalysisAgent(BaseAgent):
         error_text = "\n".join(errors)
         signature = self._match_signatures(error_text)
 
-        if self.llm.available() and errors:
+        if self.llm.available():
+            error_summary = error_text if error_text.strip() else logs[-6000:]
             user = (
                 f"Pipeline/job: {payload.get('job_name', 'unknown')}\n"
-                f"Extracted errors (with context):\n{error_text[:8000]}\n\n"
+                f"Extracted errors / Log context:\n{error_summary[:8000]}\n\n"
                 f"Rule-based hint: {signature or 'none'}"
             )
             raw = self.llm.chat(self.SYSTEM, user)

@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface AnalysisReportRepository extends JpaRepository<AnalysisReport, Long> {
     List<AnalysisReport> findByRepositoryIdOrderByCreatedAtDesc(Long repositoryId);
+    void deleteByRepositoryId(Long repositoryId);
 }

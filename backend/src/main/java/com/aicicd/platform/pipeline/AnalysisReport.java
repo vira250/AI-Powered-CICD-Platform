@@ -18,6 +18,7 @@ public class AnalysisReport {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "repository_id", nullable = false)
     private ConnectedRepository repository;

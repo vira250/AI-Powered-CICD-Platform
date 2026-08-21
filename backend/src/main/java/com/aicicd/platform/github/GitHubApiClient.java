@@ -249,21 +249,33 @@ public class GitHubApiClient {
         }
     }
 
-    /** Downloads plain-text logs for a job (follows the redirect manually). */
+    /** Downloads plain-text logs for a job (follows the redirect manually or via HttpClient). */
     public String downloadJobLogs(String token, String fullName, long jobId) {
-        URI uri = URI.create(apiBase + "/repos/" + fullName + "/actions/jobs/" + jobId + "/logs");
-        ResponseEntity<String> first = http.get()
-                .uri(uri)
-                .header(AUTH, "Bearer " + token)
-                .exchange((req, res) -> ResponseEntity.status(res.getStatusCode())
-                        .headers(res.getHeaders()).body(res.bodyTo(String.class)));
-        if (first.getStatusCode().is3xxRedirection()) {
-            URI location = first.getHeaders().getLocation();
-            if (location != null) {
-                return http.get().uri(location).retrieve().body(String.class);
+        try {
+            java.net.http.HttpClient logClient = java.net.http.HttpClient.newBuilder()
+                    .followRedirects(java.net.http.HttpClient.Redirect.ALWAYS)
+                    .connectTimeout(java.time.Duration.ofSeconds(15))
+                    .build();
+
+            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                    .uri(URI.create(apiBase + "/repos/" + fullName + "/actions/jobs/" + jobId + "/logs"))
+                    .header(AUTH, "Bearer " + token)
+                    .header(HttpHeaders.ACCEPT, "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .timeout(java.time.Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> resp = logClient.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                return resp.body();
+            } else {
+                log.warn("Failed to download job logs for job {} (status {}): {}", jobId, resp.statusCode(), resp.body());
             }
+        } catch (Exception e) {
+            log.warn("Exception downloading job logs for job {}: {}", jobId, e.getMessage());
         }
-        return first.getBody() != null ? first.getBody() : "";
+        return "";
     }
 
     /** Unified diff of a pull request. */

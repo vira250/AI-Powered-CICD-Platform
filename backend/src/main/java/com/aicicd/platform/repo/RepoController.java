@@ -25,6 +25,8 @@ public class RepoController {
 
     private final ConnectedRepositoryRepository repos;
     private final PipelineRepository pipelines;
+    private final com.aicicd.platform.pipeline.AnalysisReportRepository reports;
+    private final com.aicicd.platform.deployment.DeploymentRecordRepository deployments;
     private final GitHubAppService appService;
     private final GitHubApiClient github;
     private final OrchestratorClient orchestrator;
@@ -32,11 +34,15 @@ public class RepoController {
 
     public RepoController(ConnectedRepositoryRepository repos,
                           PipelineRepository pipelines,
+                          com.aicicd.platform.pipeline.AnalysisReportRepository reports,
+                          com.aicicd.platform.deployment.DeploymentRecordRepository deployments,
                           GitHubAppService appService,
                           GitHubApiClient github,
                           OrchestratorClient orchestrator) {
         this.repos = repos;
         this.pipelines = pipelines;
+        this.reports = reports;
+        this.deployments = deployments;
         this.appService = appService;
         this.github = github;
         this.orchestrator = orchestrator;
@@ -97,6 +103,18 @@ public class RepoController {
         return repos.findById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/{id}")
+    @Transactional("repoTransactionManager")
+    public ResponseEntity<?> disconnect(@PathVariable Long id) {
+        return repos.findById(id).map(repo -> {
+            reports.deleteByRepositoryId(id);
+            deployments.deleteByRepositoryId(id);
+            pipelines.deleteByRepositoryId(id);
+            repos.delete(repo);
+            return ResponseEntity.ok(Map.of("message", "Repository disconnected successfully", "id", id));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/connect")

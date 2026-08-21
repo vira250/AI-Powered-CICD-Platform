@@ -203,6 +203,9 @@ input:focus {
 .btn.github-btn:hover { background: #2f363d; }
 .btn.github-install-btn { padding: 12px 24px; font-size: 15px; }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger:hover { background: #dc2626; border-color: #dc2626; }
+.btn.danger.ghost { background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); color: #f87171; }
+.btn.danger.ghost:hover { background: rgba(239, 68, 68, 0.25); border-color: #ef4444; color: #fff; }
 .btn.ghost { background: transparent; border-color: transparent; }
 .btn.ghost:hover { background: var(--border); }
 .btn.large { padding: 12px 24px; font-size: 15px; }

@@ -8,4 +8,5 @@ import java.util.Optional;
 public interface DeploymentRecordRepository extends JpaRepository<DeploymentRecord, Long> {
     List<DeploymentRecord> findByRepositoryIdOrderByDeployedAtDesc(Long repositoryId);
     Optional<DeploymentRecord> findByRepositoryIdAndCurrentTrue(Long repositoryId);
+    void deleteByRepositoryId(Long repositoryId);
 }

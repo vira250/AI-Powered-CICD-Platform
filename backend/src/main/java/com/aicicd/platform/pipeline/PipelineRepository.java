@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface PipelineRepository extends JpaRepository<PipelineEntity, Long> {
     List<PipelineEntity> findByRepositoryIdOrderByCreatedAtDesc(Long repositoryId);
+    void deleteByRepositoryId(Long repositoryId);
 }

@@ -138,8 +138,13 @@ public class PipelineController {
         report.setReviewReportJson(mapper.writeValueAsString(output));
         reports.save(report);
 
-        return ResponseEntity.ok(Map.of("reportId", report.getId(), "analysis", analysis,
-                "proposedFix", output.getOrDefault("proposed_fix", Map.of())));
+        Map<String, Object> respMap = new java.util.HashMap<>();
+        respMap.put("reportId", report.getId());
+        respMap.put("analysis", analysis);
+        if (output.get("proposed_fix") != null) {
+            respMap.put("proposedFix", output.get("proposed_fix"));
+        }
+        return ResponseEntity.ok(respMap);
     }
 
     @GetMapping("/repos/{repoId}/reports")

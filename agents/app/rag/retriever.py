@@ -49,18 +49,6 @@ def _load_templates() -> list[Template]:
             language="java", framework="spring-boot", build_tool="maven",
             features={"build", "test", "security-scan", "docker", "deploy"},
         ),
-        Template(
-            name="node-frontend",
-            path=TEMPLATE_DIR / "node-frontend.yml",
-            language="javascript", framework="react", build_tool="npm",
-            features={"install", "lint", "test", "build"},
-        ),
-        Template(
-            name="node-frontend-docker",
-            path=TEMPLATE_DIR / "node-frontend-docker.yml",
-            language="javascript", framework="react", build_tool="npm",
-            features={"install", "test", "build", "docker", "deploy"},
-        ),
     ]
 
 
