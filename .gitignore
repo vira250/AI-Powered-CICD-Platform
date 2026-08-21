@@ -17,3 +17,8 @@ env/
 .vscode/
 *.swp
 .DS_Store
+
+# Documentation & notes
+*.md
+!README.md
+githistroy
