@@ -55,6 +55,7 @@ public class RepoController {
         try {
             return appService.listInstallations();
         } catch (Exception e) {
+            e.printStackTrace();
             return List.of();
         }
     }
@@ -80,7 +81,7 @@ public class RepoController {
                 }
             }
         } catch (Exception e) {
-            // log error
+            e.printStackTrace();
         }
         return allRepos;
     }
@@ -89,6 +90,13 @@ public class RepoController {
     @GetMapping
     public List<ConnectedRepository> connected() {
         return repos.findAll();
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<ConnectedRepository> getById(@PathVariable Long id) {
+        return repos.findById(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/connect")
@@ -102,6 +110,11 @@ public class RepoController {
             r.setName((String) body.get("name"));
             r.setFullName(fullName);
             r.setDefaultBranch((String) body.getOrDefault("defaultBranch", "main"));
+            if (body.get("isPrivate") instanceof Boolean b) {
+                r.setIsPrivate(b);
+            } else if (body.get("private") instanceof Boolean b) {
+                r.setIsPrivate(b);
+            }
             return repos.save(r);
         });
     }
@@ -116,7 +129,7 @@ public class RepoController {
 
         // 1. Repository file list -> agents service (rule-based stack
         //    detection + RAG template + LLM YAML + validation)
-        List<String> files = github.listFiles(token, repo.getFullName());
+        List<String> files = github.listFiles(token, repo.getFullName(), repo.getDefaultBranch());
         Map<String, Object> result = orchestrator.orchestrate("generate_pipeline",
                 Map.of("files", files, "scan_security", true));
 
@@ -133,6 +146,15 @@ public class RepoController {
         pipeline.setWorkflowYaml((String) output.get("workflow_yaml"));
         pipeline.setTemplateUsed((String) output.get("template_used"));
         pipeline.setStackJson(mapper.writeValueAsString(output.get("stack")));
+
+        // Save credits and tokens
+        if (output.get("credits_used") instanceof Number n) {
+            pipeline.setCreditsUsed(n.doubleValue());
+        }
+        if (output.get("total_tokens") instanceof Number n) {
+            pipeline.setTotalTokens(n.intValue());
+        }
+
         pipeline.setStatus(PipelineEntity.Status.GENERATED);
         pipelines.save(pipeline);
 

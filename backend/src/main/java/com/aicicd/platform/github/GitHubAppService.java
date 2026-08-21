@@ -95,7 +95,7 @@ public class GitHubAppService {
     @SuppressWarnings("unchecked")
     public java.util.List<Map<String, Object>> listInstallations() {
         return http.get()
-                .uri("/app/installations")
+                .uri("/app/installations?per_page=100")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + createAppJwt())
                 .retrieve()
                 .body(java.util.List.class);

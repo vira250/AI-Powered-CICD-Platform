@@ -40,6 +40,20 @@ public class PipelineController {
         this.orchestrator = orchestrator;
     }
 
+    @GetMapping("/pipelines")
+    public List<Map<String, Object>> listAllPipelines() {
+        return pipelines.findAll().stream()
+                .map(p -> Map.<String, Object>of(
+                        "id", p.getId(),
+                        "repositoryId", p.getRepository().getId(),
+                        "repositoryFullName", p.getRepository().getFullName(),
+                        "workflowPath", p.getWorkflowPath() != null ? p.getWorkflowPath() : "",
+                        "templateUsed", p.getTemplateUsed() != null ? p.getTemplateUsed() : "",
+                        "status", p.getStatus().name(),
+                        "createdAt", p.getCreatedAt().toString()))
+                .toList();
+    }
+
     @GetMapping("/repos/{repoId}/pipelines")
     public List<Map<String, Object>> listPipelines(@PathVariable Long repoId) {
         return pipelines.findByRepositoryIdOrderByCreatedAtDesc(repoId).stream()

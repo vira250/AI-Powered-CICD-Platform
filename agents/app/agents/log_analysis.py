@@ -20,36 +20,55 @@ _ERROR_PATTERNS = [
     re.compile(r"(?i)build failed.*"),
 ]
 
-# Known failure signatures -> (root cause hint, fix hint, simple?)
+# Known failure signatures -> (root cause hint, fix hint, simple?, next_agent_override)
+# next_agent_override=None means default routing (code_review for simple fixes)
 _SIGNATURES = [
+    # ----- YAML / workflow structure errors -> pipeline_generation -----
+    (r"(?i)yaml syntax error|invalid workflow file|unexpected value|mapping values are not allowed",
+     "Invalid YAML syntax in the GitHub Actions workflow file",
+     "Regenerate the workflow YAML with correct syntax.",
+     True, "pipeline_generation"),
+    (r"(?i)workflow is not valid|expected scalar|could not determine|on is not defined",
+     "GitHub Actions workflow structure is invalid",
+     "Fix the workflow structure: ensure 'on', 'jobs', and 'steps' are present and correctly formatted.",
+     True, "pipeline_generation"),
+    (r"(?i)invalid job name|job .* is not defined|unknown key|unrecognized named",
+     "Invalid job or step configuration in the workflow YAML",
+     "Fix the job/step names and keys in the GitHub Actions workflow.",
+     True, "pipeline_generation"),
+    (r"(?i)every step must define|each step must have|required property .* is missing",
+     "Workflow step missing required fields (uses or run)",
+     "Every step in the workflow must have either 'uses' or 'run'. Regenerate the YAML.",
+     True, "pipeline_generation"),
+    # ----- Dependency / build errors -> code_review -----
     (r"(?i)could not resolve dependencies|package .* does not exist",
      "Missing or incompatible dependency",
      "Add the missing dependency to pom.xml/build.gradle or fix its version.",
-     True),
+     True, None),
     (r"(?i)npm err! code enotfound|npm err! 404",
      "npm registry lookup failed",
      "Check the package name/version in package.json and the runner network.",
-     True),
-    (r"(?i)command not found: (\S+)",
+     True, None),
+    (r"(?i)command not found: (\\S+)",
      "Required tool not installed on the runner",
      "Add a setup step for the missing tool before it is used.",
-     True),
+     True, None),
     (r"(?i)tests? failed|there are test failures|assertionerror",
      "Unit test failure",
      "Inspect the failing test report and fix the assertion or the code under test.",
-     False),
+     False, None),
     (r"(?i)permission denied",
      "Insufficient permissions in workflow step",
      "Add execute permissions (chmod +x) or adjust the job 'permissions:' block.",
-     True),
+     True, None),
     (r"(?i)unauthorized|authentication failed|403",
      "Registry / API authentication failure",
      "Verify the DOCKER_REGISTRY_USER / DOCKER_REGISTRY_TOKEN secrets.",
-     True),
+     True, None),
     (r"(?i)out of memory|heap space",
      "Runner ran out of memory",
      "Raise the tool's heap limits (e.g. MAVEN_OPTS=-Xmx2g) or split the job.",
-     False),
+     False, None),
 ]
 
 
@@ -66,6 +85,7 @@ class LogAnalysisAgent(BaseAgent):
         "IMPACT: <one paragraph>\n"
         "SUGGESTED FIX: <numbered steps>\n"
         "SIMPLE_FIX: <yes|no>  (yes = a small code/config change can fix it)\n"
+        "YAML_ERROR: <yes|no>  (yes = the failure is caused by invalid GitHub Actions workflow YAML)\n"
         "CONFIDENCE: <0-100>"
     )
 
@@ -83,10 +103,13 @@ class LogAnalysisAgent(BaseAgent):
     # -- Context / Root Cause (rule layer) -----------------------------------
     @staticmethod
     def _match_signatures(error_text: str) -> dict[str, Any] | None:
-        for pattern, cause, fix, simple in _SIGNATURES:
+        for pattern, cause, fix, simple, next_override in _SIGNATURES:
             if re.search(pattern, error_text):
-                return {"root_cause": cause, "suggested_fix": fix,
-                        "simple_fix": simple}
+                result = {"root_cause": cause, "suggested_fix": fix,
+                          "simple_fix": simple}
+                if next_override:
+                    result["next_agent_override"] = next_override
+                return result
         return None
 
     def run(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -117,6 +140,22 @@ class LogAnalysisAgent(BaseAgent):
             }
 
         simple = parsed.get("simple_fix", False)
+        is_yaml_error = parsed.get("yaml_error", False)
+
+        # Determine which agent should handle the fix:
+        #  - YAML errors -> pipeline_generation (regenerate the workflow)
+        #  - Simple code/config errors -> code_review (propose a fix)
+        #  - Complex errors -> None (human review needed)
+        if signature and signature.get("next_agent_override"):
+            next_agent = signature["next_agent_override"]
+            is_yaml_error = True
+        elif is_yaml_error:
+            next_agent = "pipeline_generation"
+        elif simple:
+            next_agent = "code_review"
+        else:
+            next_agent = None
+
         return {
             "agent": self.name,
             "errors_extracted": len(errors),
@@ -125,10 +164,9 @@ class LogAnalysisAgent(BaseAgent):
             "impact": parsed.get("impact", ""),
             "suggested_fix": parsed.get("suggested_fix", ""),
             "simple_fix": simple,
+            "yaml_error": is_yaml_error,
             "confidence": parsed.get("confidence", 0),
-            # Signal for the AI Orchestrator: escalate simple fixes to the
-            # Code Review Agent (see main flowchart).
-            "next_agent": "code_review" if simple else None,
+            "next_agent": next_agent,
         }
 
     @staticmethod
@@ -139,10 +177,12 @@ class LogAnalysisAgent(BaseAgent):
             return m.group(1).strip() if m else ""
 
         conf = re.search(r"CONFIDENCE:\s*(\d+)", raw, re.IGNORECASE)
+        yaml_err = re.search(r"YAML_ERROR:\s*(yes|no)", raw, re.IGNORECASE)
         return {
             "root_cause": grab("ROOT CAUSE"),
             "impact": grab("IMPACT"),
             "suggested_fix": grab("SUGGESTED FIX"),
             "simple_fix": "yes" in grab("SIMPLE_FIX").lower(),
+            "yaml_error": yaml_err is not None and "yes" in yaml_err.group(1).lower(),
             "confidence": int(conf.group(1)) if conf else 50,
         }

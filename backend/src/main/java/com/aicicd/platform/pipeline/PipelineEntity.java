@@ -38,6 +38,9 @@ public class PipelineEntity {
 
     private Long lastRunId;
 
+    private Double creditsUsed;
+    private Integer totalTokens;
+
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 

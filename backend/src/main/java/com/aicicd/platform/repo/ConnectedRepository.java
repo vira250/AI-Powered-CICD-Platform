@@ -29,6 +29,7 @@ public class ConnectedRepository {
     private String fullName;           // owner/name
 
     private String defaultBranch = "main";
+    private Boolean isPrivate = false;
 
     @Column(nullable = false)
     private Instant connectedAt = Instant.now();

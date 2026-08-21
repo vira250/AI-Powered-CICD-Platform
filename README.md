@@ -2,7 +2,7 @@
 
 A multi-agent DevOps platform that connects to your GitHub repositories through a
 **GitHub App**, then automates the full CI/CD lifecycle with five AI agents
-(brain: **Qwen via OpenRouter**) coordinated by an **AI Orchestrator**:
+(brain: **Gemini 3.6 Flash via Google AI**) coordinated by an **AI Orchestrator**:
 
 | Agent | What it does |
 |---|---|
@@ -15,8 +15,8 @@ A multi-agent DevOps platform that connects to your GitHub repositories through 
 ## Architecture
 
 ```
-React Frontend  ──►  Spring Boot Backend  ──►  FastAPI AI Orchestrator ──► 5 Agents (Qwen LLM)
-   :5173               :8080  │                  :8000
+React Frontend  ──►  Spring Boot Backend  ──►  FastAPI AI Orchestrator ──► 5 Agents (Gemini 3.6 Flash)
+   :5173               :8080  │                  :8001
                               ├─► PostgreSQL (login_db + repo_db)
                               ├─► GitHub App (OAuth, installation tokens, webhooks)
                               └─► ngrok tunnel (optional, for local webhooks)
@@ -70,10 +70,11 @@ cp .env.example .env
 
 Fill in every value from step 1, put the downloaded PEM at
 `./github-app-private-key.pem` (or set `GITHUB_PRIVATE_KEY_PATH`), and set
-`OPENROUTER_API_KEY` for the Qwen LLM (get one at openrouter.ai).
-`LLM_MODEL` defaults to `qwen/qwen3-32b` — change it to any Qwen model you prefer.
+`GEMINI_API_KEY` for the Gemini LLM (get one at [aistudio.google.com](https://aistudio.google.com)).
+`LLM_MODEL` defaults to `gemini-3.6-flash` — change it to any Gemini model you prefer
+(e.g. `gemini-2.5-pro`, `gemini-2.5-flash-lite`).
 
-> Without `OPENROUTER_API_KEY` the platform still runs end-to-end in a
+> Without `GEMINI_API_KEY` the platform still runs end-to-end in a
 > rule-based fallback mode (templates are used as-is, log analysis uses
 > signature matching) — handy for demos.
 
@@ -112,7 +113,7 @@ npm run dev                       # http://localhost:5173
    (saved to `repo_db`).
 3. Click **Generate Pipeline**: the backend fetches the file tree, the
    Pipeline Generation Agent detects the stack (rule-based), the RAG store
-   supplies the closest template, Qwen produces the workflow YAML, the
+   supplies the closest template, Gemini produces the workflow YAML, the
    validator checks it (one auto-fix cycle), it's saved to the DB and pushed
    to `.github/workflows/ai-ci-cd.yml` — GitHub Actions starts running it.
 4. **Open a PR** → the Code Review + Security agents post a severity-bucketed
@@ -157,5 +158,8 @@ npm run dev                       # http://localhost:5173
   not the App's private key.
 - **Generate Pipeline returns 400**: the agents service is down — check
   `GET /api/health`.
-- **No LLM output**: set `OPENROUTER_API_KEY`; without it the platform uses its
+- **No LLM output**: set `GEMINI_API_KEY`; without it the platform uses its
   rule-based fallbacks.
+
+
+

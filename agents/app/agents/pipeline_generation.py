@@ -112,7 +112,7 @@ class PipelineGenerationAgent(BaseAgent):
         return problems
 
     def _generate_with_llm(self, stack: dict, template_content: str,
-                           template_name: str, extra: str = "") -> str:
+                           template_name: str, extra: str = "") -> tuple[str, dict]:
         user = (
             f"Detected technology stack: {stack}\n"
             f"Reference template name: {template_name}\n\n"
@@ -124,10 +124,11 @@ class PipelineGenerationAgent(BaseAgent):
         )
         if extra:
             user += f"\n\nThe previous attempt failed validation: {extra}. Fix it."
-        out = self.llm.chat(self.SYSTEM, user, temperature=0.1)
+        out, usage = self.llm.chat_with_usage(self.SYSTEM, user, temperature=0.1)
         # strip accidental markdown fences
-        return re.sub(r"^```(?:yaml|yml)?\n|\n```$", "", out.strip(),
+        workflow = re.sub(r"^```(?:yaml|yml)?\n|\n```$", "", out.strip(),
                       flags=re.MULTILINE).strip()
+        return workflow, usage
 
     def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         files: list[str] = payload.get("files", [])
@@ -136,22 +137,38 @@ class PipelineGenerationAgent(BaseAgent):
         matches = retriever.retrieve(stack, top_k=1)
         template = matches[0]
 
+        total_tokens = 0
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+
         if self.llm.available():
-            workflow = self._generate_with_llm(stack, template.content,
+            workflow, usage = self._generate_with_llm(stack, template.content,
                                                template.name)
+            total_tokens += usage.get("total_tokens", 0)
+            total_prompt_tokens += usage.get("prompt_tokens", 0)
+            total_completion_tokens += usage.get("completion_tokens", 0)
+
             problems = self._validate(workflow)
             regenerated = False
             if problems:
                 # Regenerate / Fix cycle (see PipelineGeneration diagram)
-                workflow = self._generate_with_llm(
+                workflow, usage2 = self._generate_with_llm(
                     stack, template.content, template.name,
                     extra="; ".join(problems))
+                total_tokens += usage2.get("total_tokens", 0)
+                total_prompt_tokens += usage2.get("prompt_tokens", 0)
+                total_completion_tokens += usage2.get("completion_tokens", 0)
+
                 regenerated = True
                 problems = self._validate(workflow)
         else:
             # No LLM key configured — fall back to the raw template so the
             # flow still works end-to-end for demos.
             workflow, problems, regenerated = template.content, [], False
+
+        # Calculate cost based on Gemini 3.6 Flash pricing
+        # Input: $0.075 per 1M tokens, Output: $0.30 per 1M tokens
+        credits_used = (total_prompt_tokens * 0.075 / 1_000_000) + (total_completion_tokens * 0.30 / 1_000_000)
 
         return {
             "agent": self.name,
@@ -164,4 +181,6 @@ class PipelineGenerationAgent(BaseAgent):
                 "problems": problems,
                 "regenerated": regenerated,
             },
+            "credits_used": credits_used,
+            "total_tokens": total_tokens,
         }

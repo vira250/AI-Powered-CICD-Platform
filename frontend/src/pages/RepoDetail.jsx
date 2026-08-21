@@ -49,7 +49,7 @@ export default function RepoDetail() {
       {message && <p className="notice">{message}</p>}
       <section className="card">
         <table>
-          <thead><tr><th>#</th><th>Template</th><th>Stack</th><th>Status</th><th>Created</th><th /></tr></thead>
+          <thead><tr><th>#</th><th>Template</th><th>Stack</th><th>Status</th><th>Cost</th><th>Created</th><th /></tr></thead>
           <tbody>
             {pipelines.map((p) => (
               <tr key={p.id}>
@@ -57,12 +57,13 @@ export default function RepoDetail() {
                 <td>{p.templateUsed}</td>
                 <td><code>{p.stackJson}</code></td>
                 <td><span className={`badge ${p.status.toLowerCase()}`}>{p.status}</span></td>
+                <td>{p.creditsUsed ? `$${p.creditsUsed.toFixed(5)}` : '—'}</td>
                 <td>{new Date(p.createdAt).toLocaleString()}</td>
                 <td><button className="btn" onClick={() => showYaml(p.id)}>View YAML</button></td>
               </tr>
             ))}
             {pipelines.length === 0 && (
-              <tr><td colSpan="6" className="muted">No pipelines yet — use “Generate Pipeline” on the dashboard.</td></tr>
+              <tr><td colSpan="7" className="muted">No pipelines yet — use “Generate Pipeline” on the dashboard.</td></tr>
             )}
           </tbody>
         </table>

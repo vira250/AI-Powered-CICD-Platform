@@ -38,6 +38,7 @@ public class LoginDbConfig {
         return builder.dataSource(dataSource)
                 .packages("com.aicicd.platform.auth")
                 .persistenceUnit("login")
+                .properties(java.util.Map.of("hibernate.hbm2ddl.auto", "update"))
                 .build();
     }
 

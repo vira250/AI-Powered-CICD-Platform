@@ -27,15 +27,15 @@ services:
     container_name: aicicd-agents
     env_file: .env
     environment:
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gemini-3.7-flash}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.6-flash}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
       DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
       DOCKER_REGISTRY_USER: ${DOCKER_REGISTRY_USER:-}
       DOCKER_REGISTRY_TOKEN: ${DOCKER_REGISTRY_TOKEN:-}
       PRODUCTION_HOST: ${PRODUCTION_HOST:-}
     ports:
-      - "${AGENTS_PORT:-8000}:8000"
+      - "${AGENTS_PORT:-8001}:8001"
     volumes:
       # Allow the deployment agent to use the host Docker daemon
       - /var/run/docker.sock:/var/run/docker.sock

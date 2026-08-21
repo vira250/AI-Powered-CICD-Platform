@@ -167,6 +167,7 @@ class WorkflowManager:
         self.state.record(tid, "log_analysis", analysis)
 
         fix = None
+        regenerated = None
         if analysis.get("next_agent") == "code_review" and p.get("file_path"):
             fix = self.tasks.call("code_review", {
                 "mode": "fix",
@@ -176,9 +177,22 @@ class WorkflowManager:
                 "suggested_fix": analysis.get("suggested_fix", ""),
             })
             self.state.record(tid, "code_review_fix", fix)
+        elif analysis.get("next_agent") == "pipeline_generation" and p.get("files"):
+            regenerated = self.tasks.call("pipeline_generation", {
+                "files": p.get("files", []),
+                "scan_security": False,
+                "error_context": analysis.get("root_cause", "") + "\n" + analysis.get("suggested_fix", "")
+            })
+            self.state.record(tid, "pipeline_generation", regenerated)
 
         return self.state.finish(tid, "completed") | {
-            "output": {"failure_analysis": analysis, "proposed_fix": fix}}
+            "output": {
+                "failure_analysis": analysis,
+                "proposed_fix": fix,
+                "regenerated_yaml": regenerated.get("workflow_yaml") if regenerated else None,
+                "regenerated_path": regenerated.get("workflow_path") if regenerated else None
+            }
+        }
 
     def _wf_pipeline_success(self, p: dict) -> dict:
         return self._wf_deploy(p)

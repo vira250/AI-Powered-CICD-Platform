@@ -43,6 +43,7 @@ public class RepoDbConfig {
                 .packages("com.aicicd.platform.repo", "com.aicicd.platform.pipeline",
                         "com.aicicd.platform.deployment")
                 .persistenceUnit("repo")
+                .properties(java.util.Map.of("hibernate.hbm2ddl.auto", "update"))
                 .build();
     }
 

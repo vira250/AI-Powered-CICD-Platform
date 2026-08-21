@@ -218,6 +218,17 @@ public class WebhookController {
                     }
                     report.setReviewReportJson(mapper.writeValueAsString(output));
                     reports.save(report);
+
+                    // Check if YAML was regenerated (YAML Error Feedback Loop)
+                    String regeneratedYaml = (String) output.get("regenerated_yaml");
+                    String regeneratedPath = (String) output.get("regenerated_path");
+                    if (regeneratedYaml != null && !regeneratedYaml.isEmpty()) {
+                        String path = regeneratedPath != null ? regeneratedPath : ".github/workflows/ai-ci-cd.yml";
+                        log.info("YAML error detected. Pushing regenerated YAML to {}", path);
+                        github.commitFile(token, fullName, path, regeneratedYaml,
+                                "fix: auto-regenerate CI/CD pipeline due to YAML error [ai-cicd-platform]",
+                                repo.getDefaultBranch());
+                    }
                 } catch (Exception e) {
                     log.warn("Failed to persist failure analysis: {}", e.getMessage());
                 }

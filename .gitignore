@@ -6,3 +6,14 @@ target/
 __pycache__/
 *.pyc
 pgdata/
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+.DS_Store

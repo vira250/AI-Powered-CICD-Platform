@@ -14,7 +14,7 @@ spring:
 app:
   environment: ${ENVIRONMENT:development}
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
-  agents-url: ${AGENTS_URL:http://localhost:8000}
+  agents-url: ${AGENTS_URL:http://localhost:8001}
   session-secret: ${SESSION_SECRET:${GITHUB_CLIENT_SECRET:change-me}}
 
   github:

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, Link, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, Link, useNavigate, useLocation } from 'react-router-dom'
 import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import RepoDetail from './pages/RepoDetail.jsx'
@@ -6,22 +6,71 @@ import Deployments from './pages/Deployments.jsx'
 
 function Layout({ children }) {
   const navigate = useNavigate()
+  const location = useLocation()
+
   const logout = () => {
     localStorage.removeItem('session_token')
     navigate('/login')
   }
+
+  const navigateTo = (path, hash) => {
+    if (location.pathname === path) {
+      if (hash) {
+        const el = document.getElementById(hash.replace('#', ''))
+        if (el) el.scrollIntoView({ behavior: 'smooth' })
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+    } else {
+      navigate(path + (hash || ''))
+      if (hash) {
+        setTimeout(() => {
+          const el = document.getElementById(hash.replace('#', ''))
+          if (el) el.scrollIntoView({ behavior: 'smooth' })
+        }, 150)
+      }
+    }
+  }
+
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1 className="brand">AI CI/CD</h1>
+        <div>
+          <Link to="/" style={{ textDecoration: 'none' }}>
+            <h1 className="brand">AI CI/CD</h1>
+          </Link>
+          <span className="badge" style={{ fontSize: '11px', marginTop: '4px' }}>
+            NexusPipe Multi-Agent
+          </span>
+        </div>
+
         <nav>
-          <Link to="/">Dashboard</Link>
-          <a href="#repos">Repositories</a>
-          <a href="#pipelines">Pipeline Monitoring</a>
-          <a href="#logs">Logs & AI Analysis</a>
-          <a href="#deploy">Deployment & Rollback</a>
+          <button
+            type="button"
+            className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}
+            onClick={() => navigateTo('/', '')}
+          >
+            📊 Dashboard
+          </button>
+          <button
+            type="button"
+            className="nav-item"
+            onClick={() => navigateTo('/', '#repos')}
+          >
+            📦 Repositories
+          </button>
+          <button
+            type="button"
+            className="nav-item"
+            onClick={() => navigateTo('/', '#connected-repos')}
+          >
+            ⚡ Pipelines
+          </button>
         </nav>
-        <button className="btn ghost" onClick={logout}>Log out</button>
+
+        <button className="btn ghost" onClick={logout} style={{ marginTop: 'auto', justifyContent: 'flex-start' }}>
+          🚪 Log out
+        </button>
       </aside>
       <main className="content">{children}</main>
     </div>

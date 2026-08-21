@@ -8,11 +8,23 @@ export default function Dashboard() {
   const [installationId, setInstallationId] = useState('')
   const [installations, setInstallations] = useState([])
   const [available, setAvailable] = useState([])
+  const [allPipelines, setAllPipelines] = useState([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterType, setFilterType] = useState('all') // 'all' | 'public' | 'private' | 'generated'
   const [loadingRepos, setLoadingRepos] = useState(false)
   const [busy, setBusy] = useState(null)
   const [message, setMessage] = useState('')
   const [health, setHealth] = useState(null)
   const [user, setUser] = useState(null)
+
+  const loadPipelines = useCallback(async () => {
+    try {
+      const { data } = await api.get('/pipelines')
+      setAllPipelines(data || [])
+    } catch (e) {
+      console.log('Pipelines list error:', e)
+    }
+  }, [])
 
   const loadConnected = useCallback(async () => {
     try {
@@ -50,10 +62,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadConnected()
+    loadPipelines()
     autoDiscover()
     api.get('/health').then(({ data }) => setHealth(data)).catch(() => {})
     api.get('/auth/me').then(({ data }) => { if (data.authenticated) setUser(data) }).catch(() => {})
-  }, [loadConnected, autoDiscover])
+  }, [loadConnected, loadPipelines, autoDiscover])
 
   // If URL contains installation_id parameter after installing app
   useEffect(() => {
@@ -84,13 +97,14 @@ export default function Dashboard() {
     try {
       await api.post('/repos/connect', {
         installationId: Number(effectiveInstId),
-        owner: repo.owner.login,
+        owner: repo.owner?.login || repo.owner,
         name: repo.name,
-        fullName: repo.full_name,
+        fullName: repo.full_name || repo.fullName,
         defaultBranch: repo.default_branch || 'main',
+        isPrivate: repo.private ?? false,
       })
       await loadConnected()
-      setMessage(`Successfully connected ${repo.full_name}!`)
+      setMessage(`Successfully connected ${repo.full_name || repo.fullName}!`)
     } catch (e) {
       setMessage(`Failed to connect repository: ${e.response?.data?.error || e.message}`)
     }
@@ -105,12 +119,35 @@ export default function Dashboard() {
         `Pipeline ${data.status} for ${repo.fullName} ` +
         `(stack: ${data.stack?.language}/${data.stack?.build_tool}, template: ${data.templateUsed})`,
       )
+      await loadPipelines()
     } catch (e) {
       setMessage(`Failed: ${e.response?.data?.error || e.message}`)
     } finally {
       setBusy(null)
     }
   }
+
+  // Set of repo fullNames with generated pipelines
+  const generatedRepoNames = new Set(
+    allPipelines.map((p) => p.repositoryFullName).filter(Boolean)
+  )
+  const connectedMap = new Map(connected.map((c) => [c.fullName, c]))
+
+  const filteredAvailable = available.filter((r) => {
+    const fullName = r.full_name || r.name || ''
+    const matchesSearch =
+      fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.name?.toLowerCase().includes(searchQuery.toLowerCase())
+    if (!matchesSearch) return false
+
+    const isPrivate = r.private === true || r.visibility === 'private'
+    const isGenerated = generatedRepoNames.has(fullName) || generatedRepoNames.has(r.name)
+
+    if (filterType === 'public') return !isPrivate
+    if (filterType === 'private') return isPrivate
+    if (filterType === 'generated') return isGenerated
+    return true
+  })
 
   const githubInstallUrl = "https://github.com/apps/nexus-pipe/installations/new"
 
@@ -160,12 +197,43 @@ export default function Dashboard() {
 
       {/* Discovered & Available Repositories */}
       <section className="card" id="repos">
-        <div className="row spread">
-          <h3>Step 2: Available Repositories</h3>
-          {installations.length > 0 && (
-            <span className="muted" style={{ fontSize: '13px' }}>
-              Found {installations.length} active installation(s)
-            </span>
+        <div className="row spread" style={{ marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Step 2: Available Repositories</h3>
+            {available.length > 0 && (
+              <span className="muted" style={{ fontSize: '13px' }}>
+                Showing {filteredAvailable.length} of {available.length} repositories
+              </span>
+            )}
+          </div>
+
+          {available.length > 0 && (
+            <div className="filter-controls">
+              <div className="filter-pills">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'public', label: 'Public' },
+                  { id: 'private', label: 'Private' },
+                  { id: 'generated', label: 'Generated' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`filter-pill ${filterType === tab.id ? 'active' : ''}`}
+                    onClick={() => setFilterType(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                placeholder="🔍 Search repository..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ width: '220px' }}
+              />
+            </div>
           )}
         </div>
 
@@ -174,30 +242,97 @@ export default function Dashboard() {
         {available.length > 0 ? (
           <div className="table-responsive">
             <table>
-              <thead><tr><th>Repository</th><th>Default Branch</th><th>Action</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Repository</th>
+                  <th>Visibility</th>
+                  <th>Default Branch</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
               <tbody>
-                {available.map((r) => (
-                  <tr key={r.id}>
-                    <td><strong>{r.full_name}</strong></td>
-                    <td><code>{r.default_branch || 'main'}</code></td>
-                    <td>
-                      <button className="btn primary" onClick={() => connect(r)}>
-                        + Connect Repo
-                      </button>
+                {filteredAvailable.map((r) => {
+                  const fullName = r.full_name || r.name
+                  const isPrivate = r.private === true || r.visibility === 'private'
+                  const isConnected = connectedMap.has(fullName)
+                  const isGenerated = generatedRepoNames.has(fullName)
+                  const connectedRepo = connectedMap.get(fullName)
+
+                  return (
+                    <tr key={r.id}>
+                      <td>
+                        <strong>{fullName}</strong>
+                      </td>
+                      <td>
+                        <span className={`badge ${isPrivate ? 'private' : 'public'}`}>
+                          {isPrivate ? '🔒 Private' : '🌐 Public'}
+                        </span>
+                      </td>
+                      <td><code>{r.default_branch || 'main'}</code></td>
+                      <td>
+                        <div className="repo-meta">
+                          {isConnected && (
+                            <span className="badge connected">✓ Connected</span>
+                          )}
+                          {isGenerated && (
+                            <span className="badge generated">⚡ Generated</span>
+                          )}
+                          {!isConnected && !isGenerated && (
+                            <span className="muted" style={{ fontSize: '12px' }}>Not connected</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        {isConnected ? (
+                          <div className="row" style={{ gap: '8px' }}>
+                            <button
+                              className="btn primary"
+                              disabled={busy === connectedRepo?.id}
+                              onClick={() => generatePipeline(connectedRepo)}
+                              style={{ padding: '6px 12px', fontSize: '13px' }}
+                            >
+                              {busy === connectedRepo?.id ? 'Generating…' : '⚡ Generate Pipeline'}
+                            </button>
+                            <Link
+                              className="btn ghost"
+                              to={`/repos/${connectedRepo?.id}`}
+                              style={{ padding: '6px 12px', fontSize: '13px' }}
+                            >
+                              View
+                            </Link>
+                          </div>
+                        ) : (
+                          <button
+                            className="btn primary"
+                            onClick={() => connect(r)}
+                            style={{ padding: '6px 12px', fontSize: '13px' }}
+                          >
+                            + Connect Repo
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {filteredAvailable.length === 0 && (
+                  <tr>
+                    <td colSpan="5" className="muted text-center" style={{ padding: '20px' }}>
+                      No repositories match "{searchQuery}" with filter "{filterType}"
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
         ) : (
           !loadingRepos && (
             <div style={{ padding: '16px 0' }}>
-              <p className="muted">No repositories auto-discovered yet. If you have an Installation ID, enter it below or install the GitHub App above.</p>
+              <p className="muted">No repositories auto-discovered yet. If you recently installed the GitHub App on a new repository, click <strong>🔄 Refresh Repositories</strong> above or enter your Installation ID.</p>
               <div className="row connect-input-row" style={{ marginTop: '12px' }}>
                 <input
                   type="number"
-                  placeholder="Installation ID (e.g. 6948271)"
+                  placeholder="Installation ID (e.g. 154757008)"
                   value={installationId}
                   onChange={(e) => setInstallationId(e.target.value)}
                   className="installation-input"
@@ -212,32 +347,63 @@ export default function Dashboard() {
       </section>
 
       {/* Connected Repositories */}
-      <section className="card">
+      <section className="card" id="connected-repos">
         <h3>Connected Repositories</h3>
         {message && <p className="notice">{message}</p>}
         <div className="table-responsive">
           <table>
-            <thead><tr><th>Repository</th><th>Connected Date</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Repository</th>
+                <th>Visibility</th>
+                <th>Connected Date</th>
+                <th>Pipeline</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {connected.map((r) => (
-                <tr key={r.id}>
-                  <td><Link to={`/repos/${r.id}`} className="repo-link"><strong>{r.fullName}</strong></Link></td>
-                  <td>{new Date(r.connectedAt).toLocaleString()}</td>
-                  <td className="row">
-                    <button
-                      className="btn primary"
-                      disabled={busy === r.id}
-                      onClick={() => generatePipeline(r)}
-                    >
-                      {busy === r.id ? 'Generating…' : '⚡ Generate Pipeline'}
-                    </button>
-                    <Link className="btn ghost" to={`/repos/${r.id}`}>Pipelines</Link>
-                    <Link className="btn ghost" to={`/repos/${r.id}/deployments`}>Deployments</Link>
+              {connected.map((r) => {
+                const isGenerated = generatedRepoNames.has(r.fullName)
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      <Link to={`/repos/${r.id}`} className="repo-link">
+                        <strong>{r.fullName}</strong>
+                      </Link>
+                    </td>
+                    <td>
+                      <span className={`badge ${r.isPrivate ? 'private' : 'public'}`}>
+                        {r.isPrivate ? '🔒 Private' : '🌐 Public'}
+                      </span>
+                    </td>
+                    <td>{new Date(r.connectedAt).toLocaleString()}</td>
+                    <td>
+                      {isGenerated ? (
+                        <span className="badge generated">⚡ Active</span>
+                      ) : (
+                        <span className="muted" style={{ fontSize: '13px' }}>None</span>
+                      )}
+                    </td>
+                    <td className="row">
+                      <button
+                        className="btn primary"
+                        disabled={busy === r.id}
+                        onClick={() => generatePipeline(r)}
+                      >
+                        {busy === r.id ? 'Generating…' : '⚡ Generate Pipeline'}
+                      </button>
+                      <Link className="btn ghost" to={`/repos/${r.id}`}>Pipelines</Link>
+                      <Link className="btn ghost" to={`/repos/${r.id}/deployments`}>Deployments</Link>
+                    </td>
+                  </tr>
+                )
+              })}
+              {connected.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="muted text-center" style={{ padding: '24px' }}>
+                    No repositories connected yet. Connect a repository above to begin generating AI CI/CD workflows.
                   </td>
                 </tr>
-              ))}
-              {connected.length === 0 && (
-                <tr><td colSpan="3" className="muted text-center" style={{ padding: '24px' }}>No repositories connected yet. Connect a repository above to begin generating AI CI/CD workflows.</td></tr>
               )}
             </tbody>
           </table>
@@ -246,3 +412,4 @@ export default function Dashboard() {
     </div>
   )
 }
+
