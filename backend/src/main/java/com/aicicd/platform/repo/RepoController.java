@@ -137,6 +137,28 @@ public class RepoController {
         });
     }
 
+    @GetMapping("/{id}/context")
+    public ResponseEntity<?> getRepoContextById(@PathVariable Long id,
+                                                @RequestParam(required = false) String branch) {
+        ConnectedRepository repo = repos.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("repo not connected"));
+        String token = appService.installationToken(repo.getInstallationId());
+        String targetBranch = (branch != null && !branch.isBlank()) ? branch : repo.getDefaultBranch();
+        return ResponseEntity.ok(github.getRepositoryContext(token, repo.getFullName(), targetBranch));
+    }
+
+    @GetMapping("/{owner}/{name}/context")
+    public ResponseEntity<?> getRepoContextByOwnerAndName(@PathVariable String owner,
+                                                          @PathVariable String name,
+                                                          @RequestParam(required = false) String branch) {
+        String fullName = owner + "/" + name;
+        ConnectedRepository repo = repos.findByFullName(fullName)
+                .orElseThrow(() -> new IllegalArgumentException("repo not connected"));
+        String token = appService.installationToken(repo.getInstallationId());
+        String targetBranch = (branch != null && !branch.isBlank()) ? branch : repo.getDefaultBranch();
+        return ResponseEntity.ok(github.getRepositoryContext(token, repo.getFullName(), targetBranch));
+    }
+
     // ---- Generate Pipeline button ----------------------------------------
     @PostMapping("/{id}/generate-pipeline")
     @Transactional("repoTransactionManager")
@@ -145,11 +167,16 @@ public class RepoController {
                 .orElseThrow(() -> new IllegalArgumentException("repo not connected"));
         String token = appService.installationToken(repo.getInstallationId());
 
-        // 1. Repository file list -> agents service (rule-based stack
-        //    detection + RAG template + LLM YAML + validation)
+        // 1. Fetch complete repository context + file list -> agents service
+        Map<String, Object> repoContext = github.getRepositoryContext(token, repo.getFullName(), repo.getDefaultBranch());
         List<String> files = github.listFiles(token, repo.getFullName(), repo.getDefaultBranch());
-        Map<String, Object> result = orchestrator.orchestrate("generate_pipeline",
-                Map.of("files", files, "scan_security", true));
+
+        Map<String, Object> orchPayload = new java.util.HashMap<>();
+        orchPayload.put("files", files);
+        orchPayload.put("repo_context", repoContext);
+        orchPayload.put("scan_security", true);
+
+        Map<String, Object> result = orchestrator.orchestrate("generate_pipeline", orchPayload);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> output = (Map<String, Object>) result.get("output");

@@ -161,13 +161,12 @@ class WorkflowManager:
         return self.state.finish(tid, "completed") | {"output": review}
 
     def _wf_pipeline_failed(self, p: dict) -> dict:
-        """FAILED pipeline -> Log Analysis -> (simple?) -> Code Review fix."""
+        """FAILED pipeline -> Log Analysis -> Auto-Remediate Workflow YAML with Pipeline Generation Agent."""
         tid = self.state.start("pipeline_failed")
         analysis = self.tasks.call("log_analysis", p)
         self.state.record(tid, "log_analysis", analysis)
 
         fix = None
-        regenerated = None
         if analysis.get("next_agent") == "code_review" and p.get("file_path"):
             fix = self.tasks.call("code_review", {
                 "mode": "fix",
@@ -177,20 +176,29 @@ class WorkflowManager:
                 "suggested_fix": analysis.get("suggested_fix", ""),
             })
             self.state.record(tid, "code_review_fix", fix)
-        elif analysis.get("next_agent") == "pipeline_generation" and p.get("files"):
-            regenerated = self.tasks.call("pipeline_generation", {
-                "files": p.get("files", []),
-                "scan_security": False,
-                "error_context": analysis.get("root_cause", "") + "\n" + analysis.get("suggested_fix", "")
-            })
-            self.state.record(tid, "pipeline_generation", regenerated)
+
+        # Auto-remediate pipeline workflow YAML using error logs and diagnosed root cause
+        regenerated = self.tasks.call("pipeline_generation", {
+            "files": p.get("files", []),
+            "repo_context": p.get("repo_context"),
+            "previous_yaml": p.get("workflow_yaml", ""),
+            "error_logs": "\n".join(analysis.get("error_excerpt", [])) or p.get("logs", "")[-4000:],
+            "root_cause": analysis.get("root_cause", ""),
+            "suggested_fix": analysis.get("suggested_fix", ""),
+            "scan_security": False,
+        })
+        self.state.record(tid, "pipeline_generation_remediation", regenerated)
 
         return self.state.finish(tid, "completed") | {
             "output": {
                 "failure_analysis": analysis,
                 "proposed_fix": fix,
                 "regenerated_yaml": regenerated.get("workflow_yaml") if regenerated else None,
-                "regenerated_path": regenerated.get("workflow_path") if regenerated else None
+                "regenerated_path": regenerated.get("workflow_path", ".github/workflows/ai-ci-cd.yml") if regenerated else ".github/workflows/ai-ci-cd.yml",
+                "template_used": regenerated.get("template_used") if regenerated else None,
+                "stack": regenerated.get("stack") if regenerated else None,
+                "credits_used": regenerated.get("credits_used", 0) if regenerated else 0,
+                "total_tokens": regenerated.get("total_tokens", 0) if regenerated else 0,
             }
         }
 

@@ -249,6 +249,131 @@ public class GitHubApiClient {
         }
     }
 
+    /**
+     * Constructs a comprehensive RepositoryContext containing directory structure,
+     * file metadata, secret masking, and key configuration manifest contents.
+     */
+    public Map<String, Object> getRepositoryContext(String token, String fullName, String branch) {
+        String targetBranch = (branch != null && !branch.isBlank()) ? branch : "main";
+        Map<String, Object> context = new java.util.HashMap<>();
+        List<Map<String, Object>> structure = new ArrayList<>();
+        List<Map<String, Object>> files = new ArrayList<>();
+        long totalBytes = 0;
+        String commitSha = null;
+
+        // 1. Fetch recursive tree
+        Map<?, ?> treeResp = null;
+        try {
+            URI uri = URI.create(apiBase + "/repos/" + fullName + "/git/trees/" + targetBranch + "?recursive=1");
+            treeResp = http.get().uri(uri).header(AUTH, "Bearer " + token).retrieve().body(Map.class);
+        } catch (Exception ignored) {}
+
+        if (treeResp == null || !(treeResp.get("tree") instanceof List<?>)) {
+            try {
+                URI repoUri = URI.create(apiBase + "/repos/" + fullName);
+                Map<?, ?> repoInfo = http.get().uri(repoUri).header(AUTH, "Bearer " + token).retrieve().body(Map.class);
+                if (repoInfo != null && repoInfo.get("default_branch") != null) {
+                    targetBranch = (String) repoInfo.get("default_branch");
+                    URI uri = URI.create(apiBase + "/repos/" + fullName + "/git/trees/" + targetBranch + "?recursive=1");
+                    treeResp = http.get().uri(uri).header(AUTH, "Bearer " + token).retrieve().body(Map.class);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        if (treeResp != null) {
+            commitSha = (String) treeResp.get("sha");
+            if (treeResp.get("tree") instanceof List<?> treeList) {
+                for (Object o : treeList) {
+                    if (o instanceof Map<?, ?> node) {
+                        String path = (String) node.get("path");
+                        String type = (String) node.get("type");
+                        String name = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
+                        String sha = (String) node.get("sha");
+                        long size = node.get("size") instanceof Number n ? n.longValue() : 0L;
+
+                        if ("tree".equals(type)) {
+                            structure.add(Map.of("path", path, "name", name, "type", "directory"));
+                        } else if ("blob".equals(type)) {
+                            boolean isBinary = isBinaryFile(path);
+                            boolean isSecret = isSecretFile(path);
+                            String fileType = isBinary ? "binary" : "text";
+
+                            structure.add(Map.of("path", path, "name", name, "type", fileType));
+
+                            Map<String, Object> fileObj = new java.util.HashMap<>();
+                            fileObj.put("path", path);
+                            fileObj.put("name", name);
+                            fileObj.put("type", fileType);
+                            fileObj.put("size", size);
+                            fileObj.put("sha", sha);
+                            fileObj.put("secret", isSecret);
+
+                            if (isSecret) {
+                                fileObj.put("content", "[REDACTED: Sensitive file contents masked for security]");
+                            } else if (isBinary) {
+                                fileObj.put("content", null);
+                            } else if (isKeyManifestOrConfigFile(path) && size <= 50_000) {
+                                String content = getFileContent(token, fullName, path);
+                                fileObj.put("content", content);
+                                totalBytes += (content != null ? content.length() : 0);
+                            } else {
+                                fileObj.put("content", null);
+                            }
+                            files.add(fileObj);
+                        }
+                    }
+                }
+            }
+        }
+
+        String[] parts = fullName.split("/");
+        String owner = parts.length > 0 ? parts[0] : "";
+        String repoName = parts.length > 1 ? parts[1] : fullName;
+
+        context.put("repository", Map.of(
+                "owner", owner,
+                "repositoryName", repoName,
+                "branch", targetBranch,
+                "commitSha", commitSha != null ? commitSha : ""
+        ));
+        context.put("structure", structure);
+        context.put("files", files);
+        context.put("totalBytes", totalBytes);
+        context.put("truncated", false);
+        context.put("message", "Complete repository context successfully constructed from GitHub.");
+        return context;
+    }
+
+    private static boolean isBinaryFile(String path) {
+        String lower = path.toLowerCase();
+        return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                || lower.endsWith(".gif") || lower.endsWith(".ico") || lower.endsWith(".pdf")
+                || lower.endsWith(".zip") || lower.endsWith(".tar") || lower.endsWith(".gz")
+                || lower.endsWith(".jar") || lower.endsWith(".war") || lower.endsWith(".exe")
+                || lower.endsWith(".class") || lower.endsWith(".bin") || lower.endsWith(".woff")
+                || lower.endsWith(".woff2") || lower.endsWith(".ttf") || lower.endsWith(".eot");
+    }
+
+    private static boolean isSecretFile(String path) {
+        String lower = path.toLowerCase();
+        return lower.endsWith(".env") || lower.contains(".env.") || lower.endsWith(".pem")
+                || lower.endsWith(".key") || lower.endsWith(".pkcs12") || lower.endsWith(".pfx")
+                || lower.contains("id_rsa") || lower.contains("credentials") || lower.endsWith(".keystore");
+    }
+
+    private static boolean isKeyManifestOrConfigFile(String path) {
+        String lower = path.toLowerCase();
+        return lower.endsWith("pom.xml") || lower.endsWith("build.gradle") || lower.endsWith("build.gradle.kts")
+                || lower.endsWith("settings.gradle") || lower.endsWith("package.json") || lower.endsWith("requirements.txt")
+                || lower.endsWith("pyproject.toml") || lower.endsWith("pipfile") || lower.endsWith("setup.py")
+                || lower.endsWith("go.mod") || lower.endsWith("go.sum") || lower.endsWith("cargo.toml")
+                || lower.endsWith(".csproj") || lower.endsWith(".sln") || lower.endsWith("composer.json")
+                || lower.endsWith("gemfile") || lower.endsWith("dockerfile") || lower.endsWith("docker-compose.yml")
+                || lower.endsWith("application.properties") || lower.endsWith("application.yml")
+                || lower.endsWith("app.py") || lower.endsWith("main.py") || lower.endsWith("main.go")
+                || lower.endsWith("application.java");
+    }
+
     /** Downloads plain-text logs for a job (follows the redirect manually or via HttpClient). */
     public String downloadJobLogs(String token, String fullName, long jobId) {
         try {

@@ -23,34 +23,39 @@ class LLMClient:
 
     def chat_with_usage(self, system: str, user: str, temperature: float = 0.2,
                         max_tokens: int = 4096) -> tuple[str, dict]:
-        """Single-turn chat completion. Returns (assistant message text, usage dict)."""
-        try:
-            resp = self._client.chat.completions.create(
-                model=self.model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            )
-            text = resp.choices[0].message.content or ""
-            usage = {
-                "prompt_tokens": resp.usage.prompt_tokens if resp.usage else 0,
-                "completion_tokens": resp.usage.completion_tokens if resp.usage else 0,
-                "total_tokens": resp.usage.total_tokens if resp.usage else 0,
-            }
-            return text, usage
-        except APITimeoutError:
-            log.error("LLM request timed out (model=%s)", self.model)
-            return "", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        except APIConnectionError as exc:
-            log.error("Cannot reach LLM endpoint %s: %s",
-                       settings.llm_base_url, exc)
-            return "", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        except APIError as exc:
-            log.error("LLM API error (status=%s): %s", exc.status_code, exc)
-            return "", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        """Single-turn chat completion with automatic model fallback on 429/quota."""
+        models_to_try = [self.model, "gemini-3.6-flash", "gemini-3.6-pro"]
+        # deduplicate while keeping order
+        models = list(dict.fromkeys(models_to_try))
+
+        for m in models:
+            try:
+                resp = self._client.chat.completions.create(
+                    model=m,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                )
+                text = resp.choices[0].message.content or ""
+                usage = {
+                    "prompt_tokens": resp.usage.prompt_tokens if resp.usage else 0,
+                    "completion_tokens": resp.usage.completion_tokens if resp.usage else 0,
+                    "total_tokens": resp.usage.total_tokens if resp.usage else 0,
+                }
+                return text, usage
+            except APITimeoutError:
+                log.error("LLM request timed out (model=%s)", m)
+            except APIConnectionError as exc:
+                log.error("Cannot reach LLM endpoint %s: %s", settings.llm_base_url, exc)
+                break
+            except APIError as exc:
+                log.warn("LLM API error with model %s (status=%s): %s — trying next model if available", m, exc.status_code, exc)
+                continue
+
+        return "", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     def chat(self, system: str, user: str, temperature: float = 0.2,
              max_tokens: int = 4096) -> str:

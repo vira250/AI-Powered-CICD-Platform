@@ -128,9 +128,44 @@ def detect_stack(files: list[str]) -> dict[str, Any]:
         stack["build_tool"] = "bundler"
 
     if any("dockerfile" in f for f in lowered):
-        stack["dockerized"] = True
+        # Kept False per user preference to avoid Docker steps for now
+        stack["dockerized"] = False
 
     return stack
+
+
+def format_directory_tree(structure_list: list[dict]) -> str:
+    """Returns an ASCII tree structure of the repository."""
+    if not structure_list:
+        return ""
+    lines = []
+    for node in sorted(structure_list, key=lambda x: x.get("path", "")):
+        p = node.get("path", "")
+        depth = p.count("/")
+        indent = "  " * depth
+        node_type = "/" if node.get("type") == "directory" else ""
+        name = node.get("name", p.split("/")[-1])
+        lines.append(f"{indent}├── {name}{node_type} ({node.get('type')})")
+    return "\n".join(lines[:200])
+
+
+def format_file_contents(files_list: list[dict]) -> str:
+    """Formats key manifest/config file contents for LLM prompt context."""
+    if not files_list:
+        return ""
+    content_blocks = []
+    for file in files_list:
+        path = file.get("path", "")
+        ftype = file.get("type", "text")
+        secret = file.get("secret", False)
+        content = file.get("content")
+        if secret:
+            content_blocks.append(f"--- SENSITIVE FILE MASKED: {path} ---")
+        elif ftype == "binary":
+            content_blocks.append(f"--- BINARY FILE: {path} (Size: {file.get('size', 0)} bytes) ---")
+        elif content:
+            content_blocks.append(f"--- START FILE: {path} ---\n{content}\n--- END FILE: {path} ---")
+    return "\n\n".join(content_blocks[:10])
 
 
 class PipelineGenerationAgent(BaseAgent):
@@ -145,10 +180,11 @@ class PipelineGenerationAgent(BaseAgent):
         "GUIDELINES:\n"
         "1. TRIGGER: Trigger on push to [main, master, develop] and pull_request to [main, master].\n"
         "2. ENVIRONMENT: Use `ubuntu-latest` for runners.\n"
-        "3. OFFICIAL ACTIONS: Use modern official actions with caching enabled where applicable (actions/checkout@v4, actions/setup-java@v4, actions/setup-python@v5, actions/setup-go@v5, actions/setup-dotnet@v4, docker/build-push-action@v5).\n"
-        "4. BEST PRACTICES: Include proper steps: Checkout, Runtime Setup with Cache, Dependency Installation, Unit/Integration Tests, Build/Package artifacts (JAR/binary/wheel), and (if dockerized) Docker build/push stages.\n"
+        "3. OFFICIAL ACTIONS: Use modern official actions with caching enabled where applicable (actions/checkout@v4, actions/setup-java@v4, actions/setup-python@v5, actions/setup-go@v5, actions/setup-dotnet@v4).\n"
+        "4. BEST PRACTICES: Include proper steps: Checkout, Runtime Setup with Cache, Dependency Installation, Unit/Integration Tests, and Build/Package artifacts (JAR/binary/wheel).\n"
         "5. WRAPPERS: If Maven/Gradle wrappers (mvnw/gradlew) exist, grant execute permission (`chmod +x gradlew` or `chmod +x mvnw`) before invoking.\n"
-        "6. OUTPUT FORMAT: Output ONLY valid, clean YAML. Do NOT wrap with markdown fences (no ```yaml), and include NO explanatory conversational text."
+        "6. NO DOCKER: Do NOT include any Docker, Dockerfile, `docker build`, `docker/build-push-action`, or container registry steps for now.\n"
+        "7. OUTPUT FORMAT: Output ONLY valid, clean YAML. Do NOT wrap with markdown fences (no ```yaml), and include NO explanatory conversational text."
     )
 
     # -- Pipeline Validator -------------------------------------------------
@@ -171,19 +207,67 @@ class PipelineGenerationAgent(BaseAgent):
                 problems.append(f"Job '{job_name}' has no steps")
         return problems
 
-    def _generate_with_llm(self, stack: dict, files: list[str], extra: str = "") -> tuple[str, dict]:
-        manifests = [f for f in files if any(f.lower().endswith(m) for m in ["pom.xml", "build.gradle", "requirements.txt", "pyproject.toml", "go.mod", "cargo.toml", "dockerfile", ".csproj"])]
-        user = (
-            f"Detected Stack Profile:\n"
-            f"  - Language: {stack.get('language')}\n"
-            f"  - Framework: {stack.get('framework')}\n"
-            f"  - Build Tool: {stack.get('build_tool')}\n"
-            f"  - Wrapper Present: {stack.get('has_wrapper', False)}\n"
-            f"  - Dockerized: {stack.get('dockerized', False)}\n"
-            f"  - Key Manifests: {manifests or stack.get('key_manifests', [])}\n\n"
-            f"Generate the complete GitHub Actions workflow YAML (.github/workflows/ai-ci-cd.yml) tailored precisely "
-            f"for this {stack.get('framework')} / {stack.get('language')} project."
-        )
+    def _generate_with_llm(self, stack: dict, files: list[str],
+                           repo_context: dict = None,
+                           previous_yaml: str = "", error_logs: str = "",
+                           root_cause: str = "", suggested_fix: str = "",
+                           extra: str = "") -> tuple[str, dict]:
+        manifests = [f for f in files if any(f.lower().endswith(m) for m in ["pom.xml", "build.gradle", "requirements.txt", "pyproject.toml", "go.mod", "cargo.toml", ".csproj"])]
+        
+        repo_ctx = repo_context or {}
+        structure = repo_ctx.get("structure") or []
+        context_files = repo_ctx.get("files") or []
+        tree_str = format_directory_tree(structure)
+        files_content_str = format_file_contents(context_files)
+
+        if error_logs or root_cause:
+            user = (
+                f"You are REMEDIATING and FIXING a failed GitHub Actions CI/CD workflow for this project.\n\n"
+                f"PROJECT STACK:\n"
+                f"  - Language: {stack.get('language')}\n"
+                f"  - Framework: {stack.get('framework')}\n"
+                f"  - Build Tool: {stack.get('build_tool')}\n"
+                f"  - Key Manifests: {manifests or stack.get('key_manifests', [])}\n\n"
+                f"PREVIOUS FAILING WORKFLOW YAML (.github/workflows/ai-ci-cd.yml):\n"
+                f"```yaml\n{previous_yaml or '# (No previous YAML)'}\n```\n\n"
+                f"BUILD FAILURE LOGS & EXTRACTED ERRORS:\n"
+                f"```\n{error_logs[:5000]}\n```\n\n"
+                f"DIAGNOSED ROOT CAUSE:\n{root_cause}\n\n"
+                f"SUGGESTED FIX:\n{suggested_fix}\n\n"
+            )
+            if tree_str:
+                user += f"REPOSITORY DIRECTORY STRUCTURE:\n```\n{tree_str}\n```\n\n"
+            if files_content_str:
+                user += f"KEY CONFIGURATION & MANIFEST CONTENTS:\n```\n{files_content_str}\n```\n\n"
+
+            user += (
+                f"INSTRUCTIONS:\n"
+                f"Analyze the build error logs, root cause, directory layout, and file contents. Fix and rewrite the entire corrected "
+                f"GitHub Actions workflow YAML (.github/workflows/ai-ci-cd.yml) so that the CI/CD pipeline "
+                f"executes and passes on GitHub Actions.\n"
+                f"IMPORTANT: Do NOT include any Docker commands or Docker build actions.\n"
+                f"Ensure correct runner steps, cache configurations, flags, permissions, and tool setup."
+            )
+        else:
+            user = (
+                f"Detected Stack Profile:\n"
+                f"  - Language: {stack.get('language')}\n"
+                f"  - Framework: {stack.get('framework')}\n"
+                f"  - Build Tool: {stack.get('build_tool')}\n"
+                f"  - Wrapper Present: {stack.get('has_wrapper', False)}\n"
+                f"  - Key Manifests: {manifests or stack.get('key_manifests', [])}\n\n"
+            )
+            if tree_str:
+                user += f"REPOSITORY DIRECTORY STRUCTURE:\n```\n{tree_str}\n```\n\n"
+            if files_content_str:
+                user += f"KEY CONFIGURATION & MANIFEST CONTENTS:\n```\n{files_content_str}\n```\n\n"
+
+            user += (
+                f"Generate the complete GitHub Actions workflow YAML (.github/workflows/ai-ci-cd.yml) tailored precisely "
+                f"for this {stack.get('framework')} / {stack.get('language')} project.\n"
+                f"IMPORTANT: Do NOT include any Docker commands or Docker build actions."
+            )
+
         if extra:
             user += f"\n\nThe previous attempt failed validation with errors: {extra}. Please correct the YAML syntax and structure."
 
@@ -233,16 +317,31 @@ class PipelineGenerationAgent(BaseAgent):
             )
 
     def run(self, payload: dict[str, Any]) -> dict[str, Any]:
-        files: list[str] = payload.get("files", [])
+        repo_context: dict = payload.get("repo_context") or {}
+        files: list[str] = payload.get("files") or [
+            f.get("path") for f in repo_context.get("files", []) if f.get("path")
+        ]
         stack = detect_stack(files)
+        previous_yaml: str = payload.get("previous_yaml") or payload.get("workflow_yaml", "")
+        error_logs: str = payload.get("error_logs") or payload.get("logs", "")
+        root_cause: str = payload.get("root_cause", "")
+        suggested_fix: str = payload.get("suggested_fix", "")
 
         total_tokens = 0
         total_prompt_tokens = 0
         total_completion_tokens = 0
         template_descriptor = f"{stack.get('language')}-{stack.get('framework')}-{stack.get('build_tool')}"
+        is_remediation = bool(error_logs or root_cause)
 
         if self.llm.available():
-            workflow, usage = self._generate_with_llm(stack, files)
+            workflow, usage = self._generate_with_llm(
+                stack, files,
+                repo_context=repo_context,
+                previous_yaml=previous_yaml,
+                error_logs=error_logs,
+                root_cause=root_cause,
+                suggested_fix=suggested_fix
+            )
             total_tokens += usage.get("total_tokens", 0)
             total_prompt_tokens += usage.get("prompt_tokens", 0)
             total_completion_tokens += usage.get("completion_tokens", 0)
@@ -251,7 +350,15 @@ class PipelineGenerationAgent(BaseAgent):
             regenerated = False
             if problems:
                 # Self-healing loop on syntax/structure issues
-                workflow, usage2 = self._generate_with_llm(stack, files, extra="; ".join(problems))
+                workflow, usage2 = self._generate_with_llm(
+                    stack, files,
+                    repo_context=repo_context,
+                    previous_yaml=previous_yaml,
+                    error_logs=error_logs,
+                    root_cause=root_cause,
+                    suggested_fix=suggested_fix,
+                    extra="; ".join(problems)
+                )
                 total_tokens += usage2.get("total_tokens", 0)
                 total_prompt_tokens += usage2.get("prompt_tokens", 0)
                 total_completion_tokens += usage2.get("completion_tokens", 0)
@@ -261,8 +368,10 @@ class PipelineGenerationAgent(BaseAgent):
         else:
             workflow, problems, regenerated = self._fallback_template(stack), [], False
 
+        if not workflow or not workflow.strip():
+            workflow, problems, regenerated = self._fallback_template(stack), [], False
+
         # Calculate cost based on Gemini Flash pricing
-        # Input: $0.075 per 1M tokens, Output: $0.30 per 1M tokens
         credits_used = (total_prompt_tokens * 0.075 / 1_000_000) + (total_completion_tokens * 0.30 / 1_000_000)
 
         return {
@@ -271,6 +380,7 @@ class PipelineGenerationAgent(BaseAgent):
             "template_used": template_descriptor,
             "workflow_path": ".github/workflows/ai-ci-cd.yml",
             "workflow_yaml": workflow,
+            "is_remediation": is_remediation,
             "validation": {
                 "passed": not problems,
                 "problems": problems,

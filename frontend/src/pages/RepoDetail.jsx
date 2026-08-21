@@ -34,7 +34,11 @@ export default function RepoDetail() {
     setMessage('')
     try {
       const { data } = await api.post(`/repos/${id}/runs/${runId}/analyze`)
-      setMessage(`Analysis saved (report #${data.reportId}, confidence ${data.analysis?.confidence}%)`)
+      if (data.autoPushed) {
+        setMessage(`✨ Analysis complete! Log Agent identified root cause and Pipeline Agent auto-healed the workflow & pushed to GitHub (Pipeline #${data.newPipelineId})!`)
+      } else {
+        setMessage(`Analysis saved (report #${data.reportId}, confidence ${data.analysis?.confidence}%)`)
+      }
       await load()
     } catch (e) {
       setMessage(`Analysis failed: ${e.response?.data?.error || e.message}`)
@@ -43,9 +47,28 @@ export default function RepoDetail() {
     }
   }
 
+  const generatePipeline = async () => {
+    setBusy('generating')
+    setMessage('')
+    try {
+      const { data } = await api.post(`/repos/${id}/generate-pipeline`)
+      setMessage(`🎉 Pipeline generated and pushed to GitHub! Template: ${data.templateUsed}`)
+      await load()
+    } catch (e) {
+      setMessage(`Pipeline generation failed: ${e.response?.data?.error || e.message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <div>
-      <h2 id="pipelines">Pipelines</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 id="pipelines" style={{ margin: 0 }}>Pipelines</h2>
+        <button className="btn primary" disabled={busy === 'generating'} onClick={generatePipeline}>
+          {busy === 'generating' ? '⚡ Generating AI Pipeline…' : '⚡ Generate Pipeline'}
+        </button>
+      </div>
       {message && <p className="notice">{message}</p>}
       <section className="card">
         <table>
