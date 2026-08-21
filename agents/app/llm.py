@@ -1,8 +1,6 @@
 """LLM client — Gemini model accessed through Google AI's OpenAI-compatible API.
 
-Every agent uses this as its "brain". The model id is configurable via the
-LLM_MODEL environment variable so you can swap Gemini variants without code
-changes.
+Supports primary and fallback Gemini API keys and models with automatic quota failover.
 """
 import logging
 
@@ -15,22 +13,38 @@ log = logging.getLogger(__name__)
 
 class LLMClient:
     def __init__(self) -> None:
-        self._client = OpenAI(
+        self._primary_client = OpenAI(
             api_key=settings.gemini_api_key or "missing-key",
             base_url=settings.llm_base_url,
         )
         self.model = settings.llm_model
 
+        self._fallback_client = None
+        if settings.fallback_gemini_api_key:
+            self._fallback_client = OpenAI(
+                api_key=settings.fallback_gemini_api_key,
+                base_url=settings.fallback_llm_base_url,
+            )
+        self.fallback_model = settings.fallback_llm_model or "gemini-3.5-flash"
+
     def chat_with_usage(self, system: str, user: str, temperature: float = 0.2,
                         max_tokens: int = 4096) -> tuple[str, dict]:
-        """Single-turn chat completion with automatic model fallback on 429/quota."""
-        models_to_try = [self.model, "gemini-3.6-flash", "gemini-3.6-pro"]
-        # deduplicate while keeping order
-        models = list(dict.fromkeys(models_to_try))
+        """Single-turn chat completion with automatic key and model fallback on 429/quota."""
+        # 1. Prepare candidates: (client_name, client_instance, model_name)
+        attempts = []
+        
+        # Primary attempts
+        for m in list(dict.fromkeys([self.model, "gemini-3.5-flash", "gemini-3.6-flash"])):
+            attempts.append(("Primary", self._primary_client, m))
 
-        for m in models:
+        # Fallback key attempts (if configured)
+        if self._fallback_client:
+            for m in list(dict.fromkeys([self.fallback_model, "gemini-3.5-flash", "gemini-3.6-flash"])):
+                attempts.append(("Fallback", self._fallback_client, m))
+
+        for tier, client, m in attempts:
             try:
-                resp = self._client.chat.completions.create(
+                resp = client.chat.completions.create(
                     model=m,
                     temperature=temperature,
                     max_tokens=max_tokens,
@@ -47,12 +61,12 @@ class LLMClient:
                 }
                 return text, usage
             except APITimeoutError:
-                log.error("LLM request timed out (model=%s)", m)
+                log.error("[%s] LLM request timed out (model=%s)", tier, m)
             except APIConnectionError as exc:
-                log.error("Cannot reach LLM endpoint %s: %s", settings.llm_base_url, exc)
-                break
+                log.error("[%s] Cannot reach LLM endpoint: %s", tier, exc)
             except APIError as exc:
-                log.warn("LLM API error with model %s (status=%s): %s — trying next model if available", m, exc.status_code, exc)
+                log.warn("[%s] LLM API error with model %s (status=%s): %s — trying next fallback if available",
+                         tier, m, exc.status_code, exc)
                 continue
 
         return "", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -64,8 +78,7 @@ class LLMClient:
         return text
 
     def available(self) -> bool:
-        return bool(settings.gemini_api_key)
+        return bool(settings.gemini_api_key or settings.fallback_gemini_api_key)
 
 
 llm = LLMClient()
-
