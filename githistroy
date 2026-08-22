@@ -1,0 +1,7 @@
+git logs 
+dcd6880 "my flow push" working ver
+dcd6880..5c8f543 pipeline working and no rag direct LLM
+5c8f543..dc91b69 working pipeline and log agent ver 1  if went wrong go this ver
+dc91b69..5301ccb updated gitignore
+ 5301ccb..446e9a6 "switched from direct repo to context base . software ver2"
+ 446e9a6..e53dc06  "updated ui , fallback models add. software ver3"
