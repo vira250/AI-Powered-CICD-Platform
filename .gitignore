@@ -22,3 +22,4 @@ env/
 *.md
 !README.md
 githistroy
+load_test.py
