@@ -4,9 +4,9 @@ import {
   FiArrowLeft, FiGitBranch, FiStar, FiGlobe, FiLock,
   FiExternalLink, FiUploadCloud, FiCheck, FiCopy, FiCode,
   FiClock, FiGitCommit, FiFolder, FiFileText,
-  FiSearch, FiEye, FiImage
+  FiSearch, FiEye, FiImage, FiZap, FiCpu, FiPlay, FiCheckCircle, FiAlertCircle
 } from 'react-icons/fi';
-import { getRepoDetails, getRepoStructure, importRepo, pushFile, getRepoContext } from '../api/github';
+import { getRepoDetails, getRepoStructure, importRepo, pushFile, getRepoContext, generatePipeline, getRepoPipelines } from '../api/github';
 import Navbar from '../components/Navbar';
 import FileViewerModal from '../components/FileViewerModal';
 import './RepoDetailPage.css';
@@ -136,6 +136,14 @@ export default function RepoDetailPage({ user }) {
     }
   }
 
+  // Pipeline Generation State
+  const [generatingPipeline, setGeneratingPipeline] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState(null);
+  const [pipelineError, setPipelineError] = useState(null);
+  const [pipelinesList, setPipelinesList] = useState([]);
+  const [selectedYaml, setSelectedYaml] = useState(null);
+  const [copiedYaml, setCopiedYaml] = useState(false);
+
   useEffect(() => {
     fetchRepo();
   }, [owner, name]);
@@ -149,8 +157,25 @@ export default function RepoDetailPage({ user }) {
       setRepo(data);
       setPushForm(prev => ({ ...prev, branch: data.default_branch || 'main' }));
 
+      // Fetch pipelines if repo exists in DB
+      if (data?.id) {
+        try {
+          const pList = await getRepoPipelines(data.id);
+          setPipelinesList(Array.isArray(pList) ? pList : []);
+        } catch (_) {}
+      }
+
       const tree = await getRepoStructure(owner, name, data.default_branch);
       setStructure(tree);
+
+      // Check if user came with ?action=generate
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('action') === 'generate') {
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setTimeout(() => {
+          handleGeneratePipeline(data);
+        }, 350);
+      }
     } catch (err) {
       if (!repo) {
         showToast('Failed to load repository', 'error');
@@ -160,6 +185,54 @@ export default function RepoDetailPage({ user }) {
       setLoading(false);
       setStructureLoading(false);
     }
+  }
+
+  async function handleGeneratePipeline(targetRepo = repo) {
+    const currentRepo = targetRepo || repo;
+    setGeneratingPipeline(true);
+    setPipelineError(null);
+    setPipelineResult(null);
+    showToast('⚡ AI Agents dispatched! Inspecting repository architecture & generating CI/CD pipeline...', 'info');
+
+    try {
+      const result = await generatePipeline(owner, name, currentRepo?.id);
+      setPipelineResult(result);
+      if (result?.workflowYaml) {
+        setSelectedYaml(result.workflowYaml);
+      }
+      showToast(`🎉 CI/CD Pipeline generated & pushed to GitHub! (${result.templateUsed || 'AI Custom'})`, 'success');
+
+      if (currentRepo?.id) {
+        try {
+          const pList = await getRepoPipelines(currentRepo.id);
+          setPipelinesList(Array.isArray(pList) ? pList : []);
+        } catch (_) {}
+      }
+
+      // Re-fetch tree structure so .github/workflows/ai-ci-cd.yml is immediately visible in file list
+      try {
+        const tree = await getRepoStructure(owner, name, currentRepo?.default_branch);
+        setStructure(tree);
+      } catch (_) {}
+
+      setTimeout(() => {
+        document.getElementById('pipeline-section')?.scrollIntoView({ behavior: 'smooth' });
+      }, 250);
+    } catch (err) {
+      const errMsg = err.message || 'Pipeline generation failed';
+      setPipelineError(errMsg);
+      showToast(errMsg, 'error');
+    } finally {
+      setGeneratingPipeline(false);
+    }
+  }
+
+  function handleCopyYaml(yaml) {
+    if (!yaml) return;
+    navigator.clipboard.writeText(yaml);
+    setCopiedYaml(true);
+    showToast('Workflow YAML copied to clipboard!', 'success');
+    setTimeout(() => setCopiedYaml(false), 2500);
   }
 
   async function handleImport() {
@@ -312,9 +385,37 @@ export default function RepoDetailPage({ user }) {
               </div>
 
               <div className="repo-detail-actions">
+                <button
+                  className="btn btn-primary btn-generate-pipeline"
+                  onClick={() => handleGeneratePipeline()}
+                  disabled={generatingPipeline}
+                  id="btn-generate-pipeline"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%)',
+                    border: 'none',
+                    boxShadow: '0 0 15px rgba(99, 102, 241, 0.4)',
+                    color: '#fff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontWeight: 600,
+                  }}
+                >
+                  {generatingPipeline ? (
+                    <>
+                      <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2, borderColor: '#fff', borderTopColor: 'transparent' }}></span>
+                      AI Agent Working...
+                    </>
+                  ) : (
+                    <>
+                      <FiZap size={16} />
+                      Generate Pipeline
+                    </>
+                  )}
+                </button>
                 {!repo.imported && (
                   <button
-                    className="btn btn-primary"
+                    className="btn btn-secondary"
                     onClick={handleImport}
                     disabled={importing}
                     id="btn-import-repo"
@@ -378,6 +479,253 @@ export default function RepoDetailPage({ user }) {
               </button>
             </div>
           </div>
+
+          {/* AI CI/CD Pipelines Section */}
+          <section className="pipeline-section glass-card animate-fade-in delay-2" id="pipeline-section" style={{ marginTop: '24px', padding: '24px' }}>
+            <div className="pipeline-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(236, 72, 153, 0.2) 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b5cf6' }}>
+                    <FiCpu size={18} />
+                  </div>
+                  <h2 className="structure-title" style={{ margin: 0, fontSize: '1.25rem' }}>AI CI/CD Pipelines</h2>
+                  <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)', fontSize: '11px' }}>
+                    AI Agent Powered
+                  </span>
+                </div>
+                <p className="structure-subtitle" style={{ margin: '6px 0 0 0', color: 'var(--text-secondary)' }}>
+                  Autonomous Python pipeline agent inspects your files, detects build configurations, and commits production GitHub Actions workflows.
+                </p>
+              </div>
+
+              <button
+                className="btn btn-primary"
+                onClick={() => handleGeneratePipeline()}
+                disabled={generatingPipeline}
+                id="btn-section-generate-pipeline"
+                style={{
+                  background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                {generatingPipeline ? (
+                  <>
+                    <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2, borderColor: '#fff', borderTopColor: 'transparent' }}></span>
+                    Agent Working...
+                  </>
+                ) : (
+                  <>
+                    <FiZap size={15} />
+                    Run Pipeline Agent
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Agent Progress Banner when running */}
+            {generatingPipeline && (
+              <div className="agent-progress-card" style={{
+                background: 'rgba(15, 23, 42, 0.6)',
+                border: '1px solid rgba(99, 102, 241, 0.4)',
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '20px',
+                boxShadow: '0 0 25px rgba(99, 102, 241, 0.2)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+                  <span className="spinner" style={{ width: 20, height: 20, borderWidth: 2, borderColor: '#818cf8', borderTopColor: 'transparent' }}></span>
+                  <strong style={{ color: '#818cf8', fontSize: '15px' }}>Pipeline Generation Agent in Progress</strong>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: '#10b981' }}>✓</span> 1. Assembling repository structure & file manifest from GitHub API
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: '#818cf8' }}>●</span> 2. Invoking AI Orchestrator (FastAPI Python agents service)
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--text-tertiary)' }}>○</span> 3. LLM reasoning: Detecting language, framework, dependencies & build tools
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--text-tertiary)' }}>○</span> 4. Generating GitHub Actions CI/CD YAML (.github/workflows/ai-ci-cd.yml)
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--text-tertiary)' }}>○</span> 5. Committing workflow directly to repository & triggering GitHub Actions
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Error Message */}
+            {pipelineError && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '8px',
+                padding: '14px 18px',
+                color: '#f87171',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <FiAlertCircle size={18} />
+                  <span><strong>Generation Failed:</strong> {pipelineError}</span>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleGeneratePipeline()}
+                  style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Latest Generated Pipeline Card */}
+            {pipelineResult && (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.06)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '20px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <FiCheckCircle size={20} color="#10b981" />
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '15px', color: '#10b981' }}>Pipeline Synthesized & Pushed to GitHub</h4>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        Workflow committed to <code>{pipelineResult.workflowPath || '.github/workflows/ai-ci-cd.yml'}</code>
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                      {pipelineResult.status || 'PUSHED'}
+                    </span>
+                    <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+                      Template: {pipelineResult.templateUsed}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+                  <div className="stat-card" style={{ padding: '10px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Pipeline ID</span>
+                    <div style={{ fontWeight: 700, fontSize: '14px', marginTop: '2px' }}>#{pipelineResult.pipelineId}</div>
+                  </div>
+                  <div className="stat-card" style={{ padding: '10px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Total Tokens</span>
+                    <div style={{ fontWeight: 700, fontSize: '14px', marginTop: '2px' }}>{pipelineResult.totalTokens?.toLocaleString() || '—'}</div>
+                  </div>
+                  <div className="stat-card" style={{ padding: '10px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Credits Used</span>
+                    <div style={{ fontWeight: 700, fontSize: '14px', marginTop: '2px', color: '#10b981' }}>
+                      {pipelineResult.creditsUsed != null ? `$${pipelineResult.creditsUsed.toFixed(5)}` : '—'}
+                    </div>
+                  </div>
+                </div>
+
+                {pipelineResult.workflowYaml && (
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setSelectedYaml(selectedYaml === pipelineResult.workflowYaml ? null : pipelineResult.workflowYaml)}
+                    >
+                      <FiCode size={14} />
+                      {selectedYaml === pipelineResult.workflowYaml ? 'Hide Workflow YAML' : 'View Workflow YAML'}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleCopyYaml(pipelineResult.workflowYaml)}
+                    >
+                      <FiCopy size={14} />
+                      {copiedYaml ? 'Copied!' : 'Copy YAML'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Historical Pipelines Table */}
+            {pipelinesList.length > 0 ? (
+              <div style={{ overflowX: 'auto', marginTop: '12px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 12px' }}>ID</th>
+                      <th style={{ padding: '10px 12px' }}>Template</th>
+                      <th style={{ padding: '10px 12px' }}>Workflow File</th>
+                      <th style={{ padding: '10px 12px' }}>Status</th>
+                      <th style={{ padding: '10px 12px' }}>Tokens</th>
+                      <th style={{ padding: '10px 12px' }}>Cost</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pipelinesList.map((p) => (
+                      <tr key={p.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>#{p.id}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.1)', color: '#818cf8', fontSize: '11px', padding: '2px 8px' }}>
+                            {p.templateUsed || 'standard'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
+                          {p.workflowPath || '.github/workflows/ai-ci-cd.yml'}
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span className="badge" style={{
+                            background: p.status === 'PUSHED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                            color: p.status === 'PUSHED' ? '#34d399' : '#818cf8',
+                            fontSize: '11px'
+                          }}>
+                            {p.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
+                          {p.totalTokens ? p.totalTokens.toLocaleString() : '—'}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#10b981', fontWeight: 600 }}>
+                          {p.creditsUsed != null ? `$${p.creditsUsed.toFixed(5)}` : '—'}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', color: 'var(--text-tertiary)' }}>
+                          {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : !pipelineResult && !generatingPipeline && (
+              <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-secondary)' }}>
+                <p style={{ margin: 0 }}>No pipelines generated yet. Click <strong>Generate Pipeline</strong> to create your first AI-driven CI/CD workflow.</p>
+              </div>
+            )}
+
+            {/* Workflow YAML Preview */}
+            {selectedYaml && (
+              <div style={{ marginTop: '20px', background: 'rgba(15, 23, 42, 0.8)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FiCode size={14} color="#818cf8" />
+                    <span style={{ fontSize: '12px', fontFamily: 'monospace', fontWeight: 600 }}>.github/workflows/ai-ci-cd.yml</span>
+                  </div>
+                  <button className="btn btn-ghost btn-sm" onClick={() => handleCopyYaml(selectedYaml)}>
+                    <FiCopy size={13} /> {copiedYaml ? '✓ Copied' : 'Copy'}
+                  </button>
+                </div>
+                <pre style={{ margin: 0, padding: '16px', fontSize: '12px', fontFamily: 'monospace', color: '#a3e635', maxHeight: '350px', overflowY: 'auto' }}>
+                  {selectedYaml}
+                </pre>
+              </div>
+            )}
+          </section>
 
           {/* Repository Structure */}
           <section className="structure-section glass-card animate-fade-in delay-2">

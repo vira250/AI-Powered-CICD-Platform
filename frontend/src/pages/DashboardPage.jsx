@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiArrowRight, FiBox, FiExternalLink, FiPackage, FiPlus, FiFolder, FiTrash2 } from 'react-icons/fi';
+import { FiArrowRight, FiBox, FiExternalLink, FiPackage, FiPlus, FiFolder, FiTrash2, FiZap } from 'react-icons/fi';
 import { getImportedRepos, getSelectedGithubRepository, removeImportedRepo } from '../api/github';
 import Navbar from '../components/Navbar';
 import RepoImportModal from '../components/RepoImportModal';
@@ -184,9 +184,23 @@ export default function DashboardPage({ user }) {
                       ) : (
                         <span></span>
                       )}
-                      <span className="btn-inspect-link">
-                        Inspect Files <FiFolder size={14} />
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          className="btn-card-generate"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/repo/${repo.owner}/${repo.name}?action=generate`);
+                          }}
+                          title="Generate AI Pipeline"
+                          type="button"
+                        >
+                          <FiZap size={13} />
+                          Pipeline
+                        </button>
+                        <span className="btn-inspect-link">
+                          Files <FiFolder size={14} />
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}

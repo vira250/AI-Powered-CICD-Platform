@@ -183,3 +183,28 @@ export async function getRepoContext(owner, repo, branch) {
   const branchQuery = branch ? `?branch=${encodeURIComponent(branch)}` : '';
   return apiFetch(`/repos/${owner}/${repo}/context${branchQuery}`);
 }
+
+/**
+ * Trigger AI Pipeline Generation Agent for an imported repository.
+ */
+export async function generatePipeline(owner, repo, repoId) {
+  if (repoId) {
+    return apiFetch(`/repos/${repoId}/generate-pipeline`, { method: 'POST' });
+  }
+  return apiFetch(`/repos/${owner}/${repo}/generate-pipeline`, { method: 'POST' });
+}
+
+/**
+ * Get all pipelines created for a connected repository.
+ */
+export async function getRepoPipelines(repoId) {
+  return apiFetch(`/repos/${repoId}/pipelines`);
+}
+
+/**
+ * Get details and YAML for a specific pipeline.
+ */
+export async function getPipelineDetails(pipelineId) {
+  return apiFetch(`/pipelines/${pipelineId}`);
+}
+
