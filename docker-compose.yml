@@ -33,15 +33,8 @@ services:
       FALLBACK_GEMINI_API_KEY: ${FALLBACK_GEMINI_API_KEY:-}
       FALLBACK_LLM_MODEL: ${FALLBACK_LLM_MODEL:-gemini-3.5-flash}
       FALLBACK_LLM_BASE_URL: ${FALLBACK_LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
-      DOCKER_REGISTRY: ${DOCKER_REGISTRY:-docker.io}
-      DOCKER_REGISTRY_USER: ${DOCKER_REGISTRY_USER:-}
-      DOCKER_REGISTRY_TOKEN: ${DOCKER_REGISTRY_TOKEN:-}
-      PRODUCTION_HOST: ${PRODUCTION_HOST:-}
     ports:
       - "${AGENTS_PORT:-8001}:8001"
-    volumes:
-      # Allow the deployment agent to use the host Docker daemon
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

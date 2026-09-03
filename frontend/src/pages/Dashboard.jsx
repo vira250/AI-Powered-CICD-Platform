@@ -222,16 +222,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="metric-card">
-          <div className="metric-label">
-            Self-Healing & Remediation
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          </div>
-          <div className="metric-value" style={{ color: '#10b981' }}>Active</div>
-          <div className="metric-meta">
-            <span>Automated log diagnostics loop</span>
-          </div>
-        </div>
+
 
         <div className="metric-card">
           <div className="metric-label">
@@ -524,9 +515,7 @@ export default function Dashboard() {
                         <Link className="btn ghost sm" to={`/repos/${r.id}`}>
                           Pipelines
                         </Link>
-                        <Link className="btn ghost sm" to={`/repos/${r.id}/deployments`}>
-                          Deployments
-                        </Link>
+
                         <button
                           className="btn danger-ghost sm"
                           disabled={busy === r.id}

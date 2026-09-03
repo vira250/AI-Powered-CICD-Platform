@@ -97,7 +97,6 @@ export default function RepoDetail() {
   const [repo, setRepo] = useState(null)
   const [pipelines, setPipelines] = useState([])
   const [runs, setRuns] = useState([])
-  const [reports, setReports] = useState([])
   const [selectedYaml, setSelectedYaml] = useState('')
   const [selectedPipelineId, setSelectedPipelineId] = useState(null)
   const [copied, setCopied] = useState(false)
@@ -105,17 +104,15 @@ export default function RepoDetail() {
   const [message, setMessage] = useState('')
 
   const load = useCallback(async () => {
-    const [reposResp, p, r, a] = await Promise.all([
+    const [reposResp, p, r] = await Promise.all([
       api.get('/repos').catch(() => ({ data: [] })),
       api.get(`/repos/${id}/pipelines`),
       api.get(`/repos/${id}/runs`).catch(() => ({ data: [] })),
-      api.get(`/repos/${id}/reports`),
     ])
     const foundRepo = (reposResp.data || []).find((c) => String(c.id) === String(id))
     setRepo(foundRepo)
     setPipelines(p.data || [])
     setRuns(r.data || [])
-    setReports(a.data || [])
   }, [id])
 
   useEffect(() => { load() }, [load])
@@ -133,23 +130,7 @@ export default function RepoDetail() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const analyze = async (runId) => {
-    setBusy(runId)
-    setMessage('')
-    try {
-      const { data } = await api.post(`/repos/${id}/runs/${runId}/analyze`)
-      if (data.autoPushed) {
-        setMessage(`✨ Log Agent diagnosed the failure and Pipeline Agent auto-healed the workflow & pushed to GitHub (Pipeline #${data.newPipelineId})!`)
-      } else {
-        setMessage(`Analysis report saved (report #${data.reportId}, confidence ${data.analysis?.confidence}%)`)
-      }
-      await load()
-    } catch (e) {
-      setMessage(`Analysis failed: ${e.response?.data?.error || e.message}`)
-    } finally {
-      setBusy(null)
-    }
-  }
+
 
   const generatePipeline = async () => {
     setBusy('generating')
@@ -198,9 +179,6 @@ export default function RepoDetail() {
           <button className="btn primary" disabled={busy === 'generating'} onClick={generatePipeline}>
             {busy === 'generating' ? '⚡ Generating AI Pipeline…' : '⚡ Generate Pipeline'}
           </button>
-          <Link className="btn ghost" to={`/repos/${id}/deployments`}>
-            Deployments
-          </Link>
         </div>
       </div>
 
@@ -331,7 +309,7 @@ export default function RepoDetail() {
                 <th>Status</th>
                 <th>Conclusion</th>
                 <th>Execution Time</th>
-                <th className="text-right">AI Self-Healing</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -358,11 +336,14 @@ export default function RepoDetail() {
                   </td>
                   <td>{new Date(r.created_at).toLocaleString()}</td>
                   <td className="text-right">
-                    {r.conclusion === 'failure' && (
-                      <button className="btn primary sm" disabled={busy === r.id} onClick={() => analyze(r.id)}>
-                        {busy === r.id ? 'Diagnosing…' : '⚡ AI Diagnose & Fix'}
-                      </button>
-                    )}
+                    <a
+                      href={r.html_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn ghost sm"
+                    >
+                      View on GitHub ↗
+                    </a>
                   </td>
                 </tr>
               ))}
@@ -378,73 +359,7 @@ export default function RepoDetail() {
         </div>
       </section>
 
-      {/* AI Diagnostic Reports */}
-      {reports.length > 0 && (
-        <section className="card">
-          <div className="card-header">
-            <div>
-              <h2 className="card-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                AI Diagnostic & Remediation Reports
-              </h2>
-              <p className="card-subtitle">Automated root-cause analysis and self-healing logs from Log Analysis Agent</p>
-            </div>
-          </div>
 
-          <div>
-            {reports.map((r) => (
-              <div key={r.id} className="diag-card">
-                <div className="diag-card-header">
-                  <div className="row" style={{ gap: '10px' }}>
-                    <span className="badge generated">{r.agent}</span>
-                    <strong style={{ color: 'var(--text-primary)' }}>
-                      {r.rootCause || 'Failure Analysis Report'}
-                    </strong>
-                  </div>
-                  <div className="row" style={{ gap: '8px' }}>
-                    {r.confidence != null && (
-                      <span className="badge success">{r.confidence}% Confidence</span>
-                    )}
-                    {r.simpleFix && (
-                      <span className="badge public">Auto-Remediated</span>
-                    )}
-                    <span className="muted" style={{ fontSize: '12px' }}>
-                      {new Date(r.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="diag-body">
-                  {r.impact && (
-                    <div className="diag-section">
-                      <div className="diag-section-title">Impact Assessment</div>
-                      <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{r.impact}</p>
-                    </div>
-                  )}
-
-                  {r.suggestedFix && (
-                    <div className="diag-section">
-                      <div className="diag-section-title">Suggested Remediation</div>
-                      <div className="diag-fix-box">
-                        💡 {r.suggestedFix}
-                      </div>
-                    </div>
-                  )}
-
-                  {r.errorExcerpt && (
-                    <div className="diag-section">
-                      <div className="diag-section-title">Build Log Excerpt</div>
-                      <pre className="code-content" style={{ borderRadius: '8px', maxHeight: '180px', overflowY: 'auto' }}>
-                        {r.errorExcerpt}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }

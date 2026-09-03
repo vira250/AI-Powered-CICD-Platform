@@ -3,9 +3,6 @@ package com.aicicd.platform.webhook;
 import com.aicicd.platform.config.AppProperties;
 import com.aicicd.platform.github.GitHubApiClient;
 import com.aicicd.platform.github.GitHubAppService;
-import com.aicicd.platform.orchestrator.OrchestratorClient;
-import com.aicicd.platform.pipeline.AnalysisReport;
-import com.aicicd.platform.pipeline.AnalysisReportRepository;
 import com.aicicd.platform.repo.ConnectedRepository;
 import com.aicicd.platform.repo.ConnectedRepositoryRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,16 +17,11 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Map;
 
 /**
- * GitHub App webhook receiver. Events handled (see Main FlowChart):
+ * GitHub App webhook receiver. Events handled:
  *  - installation / installation_repositories -> sync repos into repo_db
- *  - pull_request (opened/synchronize)        -> Code Review + Security agents
- *  - workflow_run (completed)                 -> success: mark pipeline;
- *                                               failure: Log Analysis agent
- *                                               (+ Code Review fix if simple)
  */
 @RestController
 @RequestMapping("/api/webhooks")
@@ -40,24 +32,16 @@ public class WebhookController {
     private final AppProperties props;
     private final GitHubAppService appService;
     private final GitHubApiClient github;
-    private final OrchestratorClient orchestrator;
     private final ConnectedRepositoryRepository repos;
-    private final AnalysisReportRepository reports;
-    private final com.aicicd.platform.pipeline.PipelineRepository pipelines;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public WebhookController(AppProperties props, GitHubAppService appService,
-                             GitHubApiClient github, OrchestratorClient orchestrator,
-                             ConnectedRepositoryRepository repos,
-                             AnalysisReportRepository reports,
-                             com.aicicd.platform.pipeline.PipelineRepository pipelines) {
+                             GitHubApiClient github,
+                             ConnectedRepositoryRepository repos) {
         this.props = props;
         this.appService = appService;
         this.github = github;
-        this.orchestrator = orchestrator;
         this.repos = repos;
-        this.reports = reports;
-        this.pipelines = pipelines;
     }
 
     @PostMapping("/github")
@@ -74,8 +58,6 @@ public class WebhookController {
 
         switch (event) {
             case "installation", "installation_repositories" -> handleInstallation(payload);
-            case "pull_request" -> handlePullRequest(payload);
-            case "workflow_run" -> handleWorkflowRun(payload);
             default -> log.debug("Ignored event {}", event);
         }
         return ResponseEntity.ok(Map.of("received", event));
@@ -112,176 +94,5 @@ public class WebhookController {
                 return repos.save(cr);
             });
         }
-    }
-
-    // ------------------------------------------------------- pull request
-    void handlePullRequest(JsonNode payload) {
-        String action = payload.path("action").asText();
-        if (!action.equals("opened") && !action.equals("synchronize")) return;
-
-        long installationId = payload.path("installation").path("id").asLong();
-        String fullName = payload.path("repository").path("full_name").asText();
-        int prNumber = payload.path("pull_request").path("number").asInt();
-        if (installationId == 0 || fullName.isEmpty()) return;
-
-        String token = appService.installationToken(installationId);
-        String diff = github.getPullRequestDiff(token, fullName, prNumber);
-
-        Map<String, Object> result = orchestrator.orchestrate("review_pull_request",
-                Map.of("diff", diff));
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> output = (Map<String, Object>) result.get("output");
-        if (output == null) return;
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> summary = (Map<String, Object>) output.get("summary");
-        StringBuilder comment = new StringBuilder("## AI Code Review\n\n");
-        if (summary != null) {
-            comment.append("| Severity | Count |\n|---|---|\n");
-            summary.forEach((k, v) -> comment.append("| ").append(k)
-                    .append(" | ").append(v).append(" |\n"));
-        }
-        @SuppressWarnings("unchecked")
-        Map<String, List<String>> buckets =
-                (Map<String, List<String>>) output.get("report");
-        if (buckets != null) {
-            buckets.forEach((sev, items) -> {
-                if (items != null && !items.isEmpty()) {
-                    comment.append("\n### ").append(sev.toUpperCase()).append('\n');
-                    items.forEach(i -> comment.append("- ").append(i).append('\n'));
-                }
-            });
-        }
-        github.postPrComment(token, fullName, prNumber, comment.toString());
-
-        // persist a copy for the dashboard
-        repos.findByFullName(fullName).ifPresent(repo -> {
-            try {
-                AnalysisReport report = new AnalysisReport();
-                report.setRepository(repo);
-                report.setAgent("code_review");
-                report.setReviewReportJson(mapper.writeValueAsString(output));
-                report.setRootCause("PR #" + prNumber + " review");
-                reports.save(report);
-            } catch (Exception e) {
-                log.warn("Failed to persist review report: {}", e.getMessage());
-            }
-        });
-    }
-
-    // ------------------------------------------------------- workflow run
-    void handleWorkflowRun(JsonNode payload) {
-        if (!"completed".equals(payload.path("action").asText())) return;
-
-        String fullName = payload.path("repository").path("full_name").asText();
-        JsonNode run = payload.path("workflow_run");
-        long runId = run.path("id").asLong();
-        String conclusion = run.path("conclusion").asText();
-        if (fullName.isEmpty()) return;
-
-        if ("failure".equals(conclusion)) {
-            ConnectedRepository repo = repos.findByFullName(fullName)
-                    .or(() -> repos.findAll().stream()
-                            .filter(r -> r.getFullName() != null && r.getFullName().equalsIgnoreCase(fullName))
-                            .findFirst())
-                    .orElse(null);
-
-            if (repo == null) {
-                log.warn("Received workflow_run failure for unconnected repo: {}", fullName);
-                return;
-            }
-
-            long instId = payload.path("installation").path("id").asLong();
-            if (instId == 0) {
-                instId = repo.getInstallationId();
-            }
-            if (instId == 0) {
-                log.warn("No installation ID available for repo: {}", fullName);
-                return;
-            }
-
-            try {
-                String token = appService.installationToken(instId);
-                StringBuilder logs = new StringBuilder();
-                String failedJob = "unknown";
-                for (Map<String, Object> job : github.listRunJobs(token, fullName, runId)) {
-                    if ("failure".equals(job.get("conclusion"))) {
-                        failedJob = String.valueOf(job.get("name"));
-                        logs.append("== Job: ").append(failedJob).append(" ==\n")
-                                .append(github.downloadJobLogs(token, fullName,
-                                        ((Number) job.get("id")).longValue()))
-                                .append('\n');
-                    }
-                }
-
-                Map<String, Object> repoContext = github.getRepositoryContext(token, fullName, repo.getDefaultBranch());
-                List<String> files = github.listFiles(token, fullName, repo.getDefaultBranch());
-                List<com.aicicd.platform.pipeline.PipelineEntity> existingPipelines = pipelines.findByRepositoryIdOrderByCreatedAtDesc(repo.getId());
-                String previousYaml = existingPipelines.isEmpty() ? "" : existingPipelines.get(0).getWorkflowYaml();
-
-                Map<String, Object> orchPayload = new java.util.HashMap<>();
-                orchPayload.put("logs", logs.toString());
-                orchPayload.put("job_name", failedJob);
-                orchPayload.put("files", files);
-                orchPayload.put("repo_context", repoContext);
-                if (previousYaml != null && !previousYaml.isBlank()) {
-                    orchPayload.put("workflow_yaml", previousYaml);
-                }
-
-                Map<String, Object> result = orchestrator.orchestrate("pipeline_failed", orchPayload);
-
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> output = (Map<String, Object>) result.get("output");
-                    if (output == null) return;
-
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> analysis = (Map<String, Object>) output.get("failure_analysis");
-                    AnalysisReport report = new AnalysisReport();
-                    report.setRepository(repo);
-                    report.setRunId(runId);
-                    report.setAgent("log_analysis");
-                    if (analysis != null) {
-                        report.setRootCause((String) analysis.get("root_cause"));
-                        report.setImpact((String) analysis.get("impact"));
-                        report.setSuggestedFix((String) analysis.get("suggested_fix"));
-                        Object conf = analysis.get("confidence");
-                        report.setConfidence(conf instanceof Number n ? n.intValue() : null);
-                        report.setSimpleFix(Boolean.TRUE.equals(analysis.get("simple_fix")));
-                    }
-                    report.setReviewReportJson(mapper.writeValueAsString(output));
-                    reports.save(report);
-
-                    // Auto-push remediated YAML back to GitHub Actions
-                    String regeneratedYaml = (String) output.get("regenerated_yaml");
-                    String regeneratedPath = (String) output.getOrDefault("regenerated_path", ".github/workflows/ai-ci-cd.yml");
-                    if (regeneratedYaml != null && !regeneratedYaml.isBlank()) {
-                        com.aicicd.platform.pipeline.PipelineEntity healed = new com.aicicd.platform.pipeline.PipelineEntity();
-                        healed.setRepository(repo);
-                        healed.setWorkflowPath(regeneratedPath);
-                        healed.setWorkflowYaml(regeneratedYaml);
-                        healed.setTemplateUsed((String) output.get("template_used"));
-                        healed.setStackJson(mapper.writeValueAsString(output.get("stack")));
-                        if (output.get("credits_used") instanceof Number n) {
-                            healed.setCreditsUsed(n.doubleValue());
-                        }
-                        if (output.get("total_tokens") instanceof Number n) {
-                            healed.setTotalTokens(n.intValue());
-                        }
-                        healed.setStatus(com.aicicd.platform.pipeline.PipelineEntity.Status.PUSHED);
-                        healed.setPushedAt(java.time.Instant.now());
-                        pipelines.save(healed);
-
-                        log.info("Auto-remediated workflow generated for {}. Committing to GitHub at {}", fullName, regeneratedPath);
-                        github.commitFile(token, fullName, regeneratedPath, regeneratedYaml,
-                                "fix(ci): auto-remediated CI/CD workflow from build failure [ai-cicd-platform]",
-                                repo.getDefaultBranch());
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to process failed pipeline webhook: {}", e.getMessage(), e);
-                }
-            }
-        // "success" -> the frontend/deployment flow takes over from here
-        // (Deployment Agent build/push/deploy + health check + rollback).
     }
 }

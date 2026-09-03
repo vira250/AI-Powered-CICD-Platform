@@ -15,14 +15,7 @@ class Settings(BaseSettings):
     fallback_llm_model: str = "gemini-3.5-flash"
     fallback_llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-    # Deployment agent
-    docker_registry: str = "docker.io"
-    docker_registry_user: str = ""
-    docker_registry_token: str = ""
-    production_host: str = ""
-
     agents_port: int = 8001
 
 
 settings = Settings()
-

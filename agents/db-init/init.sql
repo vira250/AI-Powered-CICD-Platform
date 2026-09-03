@@ -1,6 +1,6 @@
 -- Creates the two databases used by the Spring Boot backend.
 -- "login_db" : user accounts (GitHub OAuth sessions)
--- "repo_db"  : repositories, pipelines, analysis reports, deployments
+-- "repo_db"  : repositories, pipelines
 
 SELECT 'CREATE DATABASE login_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'login_db')\gexec
 SELECT 'CREATE DATABASE repo_db'  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'repo_db')\gexec
@@ -45,30 +45,3 @@ CREATE TABLE IF NOT EXISTS pipelines (
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
     pushed_at TIMESTAMP WITHOUT TIME ZONE
 );
-
-CREATE TABLE IF NOT EXISTS analysis_reports (
-    id BIGSERIAL PRIMARY KEY,
-    repository_id BIGINT NOT NULL REFERENCES connected_repositories(id) ON DELETE CASCADE,
-    run_id BIGINT,
-    agent VARCHAR(100),
-    root_cause TEXT,
-    impact TEXT,
-    suggested_fix TEXT,
-    confidence INTEGER,
-    simple_fix BOOLEAN,
-    error_excerpt TEXT,
-    review_report_json TEXT,
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS deployments (
-    id BIGSERIAL PRIMARY KEY,
-    repository_id BIGINT NOT NULL REFERENCES connected_repositories(id) ON DELETE CASCADE,
-    version VARCHAR(255) NOT NULL,
-    image VARCHAR(255),
-    status VARCHAR(50) NOT NULL,
-    current BOOLEAN NOT NULL DEFAULT FALSE,
-    detail_json TEXT,
-    deployed_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-);
-

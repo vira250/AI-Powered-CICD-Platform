@@ -7,12 +7,7 @@ Implements the Orchestrator architecture:
      Spring Boot backend for persistence in PostgreSQL).
 
 The Task Manager exposes each agent as a callable "function" (name,
-description, input schema) — mirroring LLM function-calling — and supports
-chained workflows, e.g.:
-
-  pipeline_failed  -> log_analysis -> (simple fix?) -> code_review(mode=fix)
-  pr_opened        -> code_review + security (parallel fan-out)
-  pipeline_success -> deployment
+description, input schema) — mirroring LLM function-calling.
 """
 from __future__ import annotations
 
@@ -21,8 +16,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any, Callable
 
-from .agents import (CodeReviewAgent, DeploymentAgent, LogAnalysisAgent,
-                     PipelineGenerationAgent, SecurityAgent)
+from .agents import PipelineGenerationAgent
 
 TASK_TIMEOUT_SECONDS = 300
 MAX_RETRIES = 2
@@ -34,24 +28,12 @@ class TaskManager:
     def __init__(self) -> None:
         self._agents = {
             "pipeline_generation": PipelineGenerationAgent(),
-            "log_analysis": LogAnalysisAgent(),
-            "code_review": CodeReviewAgent(),
-            "security": SecurityAgent(),
-            "deployment": DeploymentAgent(),
         }
 
     # -- function-calling style schema, surfaced at /functions -------------
     def functions(self) -> list[dict[str, Any]]:
         schemas = {
             "pipeline_generation": {"files": "list[str] — repo file paths"},
-            "log_analysis": {"logs": "str", "job_name": "str?"},
-            "code_review": {"mode": "review|fix", "diff": "str",
-                            "file_path": "str?", "content": "str?",
-                            "root_cause": "str?", "suggested_fix": "str?"},
-            "security": {"files": "list[{path, content}]"},
-            "deployment": {"action": "deploy|rollback", "repo": "str",
-                           "version": "str?", "workdir": "str?",
-                           "health_url": "str?", "previous_image": "str?"},
         }
         return [{"name": a.name, "description": a.description,
                  "parameters": schemas.get(a.name, {})}
@@ -107,18 +89,13 @@ class StateManager:
 
 
 class WorkflowManager:
-    """Chains agents into the workflows shown in the main flowchart."""
+    """Manages the pipeline generation workflow."""
 
     def __init__(self, tasks: TaskManager, state: StateManager) -> None:
         self.tasks = tasks
         self.state = state
         self._workflows: dict[str, Callable[[dict], dict]] = {
             "generate_pipeline": self._wf_generate_pipeline,
-            "review_pull_request": self._wf_review_pull_request,
-            "pipeline_failed": self._wf_pipeline_failed,
-            "pipeline_success": self._wf_pipeline_success,
-            "deploy": self._wf_deploy,
-            "rollback": self._wf_rollback,
         }
 
     def events(self) -> list[str]:
@@ -139,85 +116,9 @@ class WorkflowManager:
         tid = self.state.start("generate_pipeline")
         result = self.tasks.call("pipeline_generation", p)
         self.state.record(tid, "pipeline_generation", result)
-        if p.get("scan_security") and result.get("workflow_yaml"):
-            sec = self.tasks.call("security", {"files": [
-                {"path": result["workflow_path"],
-                 "content": result["workflow_yaml"]}]})
-            self.state.record(tid, "security", sec)
-            result["security_scan"] = sec
         status = "completed" if result.get("validation", {}).get("passed") \
             else "completed_with_warnings"
         return self.state.finish(tid, status) | {"output": result}
-
-    def _wf_review_pull_request(self, p: dict) -> dict:
-        tid = self.state.start("review_pull_request")
-        review = self.tasks.call("code_review", {"mode": "review",
-                                                 "diff": p.get("diff", "")})
-        self.state.record(tid, "code_review", review)
-        if p.get("files"):
-            sec = self.tasks.call("security", {"files": p["files"]})
-            self.state.record(tid, "security", sec)
-            review["security_scan"] = sec
-        return self.state.finish(tid, "completed") | {"output": review}
-
-    def _wf_pipeline_failed(self, p: dict) -> dict:
-        """FAILED pipeline -> Log Analysis -> Auto-Remediate Workflow YAML with Pipeline Generation Agent."""
-        tid = self.state.start("pipeline_failed")
-        analysis = self.tasks.call("log_analysis", p)
-        self.state.record(tid, "log_analysis", analysis)
-
-        fix = None
-        if analysis.get("next_agent") == "code_review" and p.get("file_path"):
-            fix = self.tasks.call("code_review", {
-                "mode": "fix",
-                "file_path": p.get("file_path"),
-                "content": p.get("file_content", ""),
-                "root_cause": analysis.get("root_cause", ""),
-                "suggested_fix": analysis.get("suggested_fix", ""),
-            })
-            self.state.record(tid, "code_review_fix", fix)
-
-        # Auto-remediate pipeline workflow YAML using error logs and diagnosed root cause
-        regenerated = self.tasks.call("pipeline_generation", {
-            "files": p.get("files", []),
-            "repo_context": p.get("repo_context"),
-            "previous_yaml": p.get("workflow_yaml", ""),
-            "error_logs": "\n".join(analysis.get("error_excerpt", [])) or p.get("logs", "")[-4000:],
-            "root_cause": analysis.get("root_cause", ""),
-            "suggested_fix": analysis.get("suggested_fix", ""),
-            "scan_security": False,
-        })
-        self.state.record(tid, "pipeline_generation_remediation", regenerated)
-
-        return self.state.finish(tid, "completed") | {
-            "output": {
-                "failure_analysis": analysis,
-                "proposed_fix": fix,
-                "regenerated_yaml": regenerated.get("workflow_yaml") if regenerated else None,
-                "regenerated_path": regenerated.get("workflow_path", ".github/workflows/ai-ci-cd.yml") if regenerated else ".github/workflows/ai-ci-cd.yml",
-                "template_used": regenerated.get("template_used") if regenerated else None,
-                "stack": regenerated.get("stack") if regenerated else None,
-                "credits_used": regenerated.get("credits_used", 0) if regenerated else 0,
-                "total_tokens": regenerated.get("total_tokens", 0) if regenerated else 0,
-            }
-        }
-
-    def _wf_pipeline_success(self, p: dict) -> dict:
-        return self._wf_deploy(p)
-
-    def _wf_deploy(self, p: dict) -> dict:
-        tid = self.state.start("deploy")
-        result = self.tasks.call("deployment", {**p, "action": "deploy"})
-        self.state.record(tid, "deployment", result)
-        return self.state.finish(tid, result.get("status", "unknown")) | {
-            "output": result}
-
-    def _wf_rollback(self, p: dict) -> dict:
-        tid = self.state.start("rollback")
-        result = self.tasks.call("deployment", {**p, "action": "rollback"})
-        self.state.record(tid, "rollback", result)
-        return self.state.finish(tid, result.get("status", "unknown")) | {
-            "output": result}
 
 
 class Orchestrator:
