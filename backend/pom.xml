@@ -102,12 +102,6 @@
             <version>1.78</version>
         </dependency>
 
-        <!-- Commons Codec for HMAC validation -->
-        <dependency>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
-            <version>1.16.1</version>
-        </dependency>
 
         <!-- Automatically load .env environment variables in Spring Boot -->
         <dependency>

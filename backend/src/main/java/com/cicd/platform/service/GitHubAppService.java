@@ -2,7 +2,6 @@ package com.cicd.platform.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
@@ -79,10 +78,10 @@ public class GitHubAppService {
         long expMillis = nowMillis + (10 * 60 * 1000); // 10 minutes maximum
 
         return Jwts.builder()
-                .setIssuer(appId)
-                .setIssuedAt(new Date(nowMillis))
-                .setExpiration(new Date(expMillis))
-                .signWith(getPrivateKey(), SignatureAlgorithm.RS256)
+                .issuer(appId)
+                .issuedAt(new Date(nowMillis))
+                .expiration(new Date(expMillis))
+                .signWith(getPrivateKey())
                 .compact();
     }
 

@@ -51,7 +51,8 @@ public class CICDService {
                         )
                 );
                 
-                Map checkRun = webClient.post()
+                @SuppressWarnings("unchecked")
+                Map<String, Object> checkRun = webClient.post()
                         .uri("/repos/{owner}/{repo}/check-runs", owner, repo)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)

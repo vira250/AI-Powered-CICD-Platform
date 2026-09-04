@@ -2,14 +2,18 @@ package com.cicd.platform.controller;
 
 import com.cicd.platform.service.CICDService;
 import com.fasterxml.jackson.databind.JsonNode;
-import org.apache.commons.codec.digest.HmacAlgorithms;
-import org.apache.commons.codec.digest.HmacUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 @RestController
 @RequestMapping("/api/webhooks")
@@ -87,11 +91,21 @@ public class WebhookController {
     }
 
     private boolean verifySignature(String payload, String signatureHeader) {
-        if (!signatureHeader.startsWith("sha256=")) {
+        if (signatureHeader == null || !signatureHeader.startsWith("sha256=")) {
             return false;
         }
-        String expectedHash = new HmacUtils(HmacAlgorithms.HMAC_SHA_256, webhookSecret).hmacHex(payload);
-        String actualHash = signatureHeader.substring(7);
-        return expectedHash.equals(actualHash);
+        if (webhookSecret == null || webhookSecret.isBlank()) {
+            return true;
+        }
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String expectedHash = HexFormat.of().formatHex(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+            String actualHash = signatureHeader.substring(7);
+            return MessageDigest.isEqual(expectedHash.getBytes(StandardCharsets.UTF_8), actualHash.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            log.error("Error verifying webhook signature", e);
+            return false;
+        }
     }
 }
