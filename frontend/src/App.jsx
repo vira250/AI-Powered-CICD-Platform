@@ -4,6 +4,11 @@ import { getUser, setAuthToken } from './api/github';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import RepoDetailPage from './pages/RepoDetailPage';
+import PipelinesPage from './pages/PipelinesPage';
+import CodeReviewPage from './pages/CodeReviewPage';
+import LogAnalysisPage from './pages/LogAnalysisPage';
+import DeploymentsPage from './pages/DeploymentsPage';
+import SettingsPage from './pages/SettingsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import './index.css';
 
@@ -88,6 +93,51 @@ function AppShell() {
         element={
           <ProtectedRoute user={user} loading={loading || authPending}>
             <RepoDetailPage user={user} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/pipelines"
+        element={
+          <ProtectedRoute user={user} loading={loading || authPending}>
+            <PipelinesPage user={user} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/reviews"
+        element={
+          <ProtectedRoute user={user} loading={loading || authPending}>
+            <CodeReviewPage user={user} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/logs"
+        element={
+          <ProtectedRoute user={user} loading={loading || authPending}>
+            <LogAnalysisPage user={user} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/deployments"
+        element={
+          <ProtectedRoute user={user} loading={loading || authPending}>
+            <DeploymentsPage user={user} />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute user={user} loading={loading || authPending}>
+            <SettingsPage user={user} />
           </ProtectedRoute>
         }
       />

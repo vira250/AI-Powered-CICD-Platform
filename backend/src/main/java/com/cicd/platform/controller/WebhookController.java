@@ -1,7 +1,11 @@
 package com.cicd.platform.controller;
 
+import com.cicd.platform.service.AgentOrchestratorService;
 import com.cicd.platform.service.CICDService;
+import com.cicd.platform.service.GitHubAppService;
+import com.cicd.platform.service.GitHubService;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,13 +26,22 @@ public class WebhookController {
     private static final Logger log = LoggerFactory.getLogger(WebhookController.class);
 
     private final CICDService cicdService;
-    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    private final AgentOrchestratorService orchestratorService;
+    private final GitHubService gitHubService;
+    private final GitHubAppService gitHubAppService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${github.app.webhook-secret}")
     private String webhookSecret;
 
-    public WebhookController(CICDService cicdService) {
+    public WebhookController(CICDService cicdService,
+                             AgentOrchestratorService orchestratorService,
+                             GitHubService gitHubService,
+                             GitHubAppService gitHubAppService) {
         this.cicdService = cicdService;
+        this.orchestratorService = orchestratorService;
+        this.gitHubService = gitHubService;
+        this.gitHubAppService = gitHubAppService;
     }
 
     @PostMapping("/github")
@@ -53,32 +66,77 @@ public class WebhookController {
             JsonNode jsonPayload = objectMapper.readTree(payload);
             Long installationId = jsonPayload.path("installation").path("id").asLong();
 
-            if (installationId == 0) {
-                log.info("Ignoring event without installation_id");
-                return ResponseEntity.ok("Ignored");
-            }
-
+            // ── EVENT 1: PUSH ──────────────────────────────────────────────
             if ("push".equals(eventType)) {
                 String headSha = jsonPayload.path("after").asText();
                 String owner = jsonPayload.path("repository").path("owner").path("login").asText();
                 String repo = jsonPayload.path("repository").path("name").asText();
 
-                // Skip if a branch was deleted
-                if (!"0000000000000000000000000000000000000000".equals(headSha)) {
+                if (!"0000000000000000000000000000000000000000".equals(headSha) && installationId != 0) {
                     cicdService.triggerPipeline(installationId, owner, repo, headSha);
                 }
 
+            // ── EVENT 2: PULL REQUEST (Trigger Code Review Agent) ───────────
             } else if ("pull_request".equals(eventType)) {
                 String action = jsonPayload.path("action").asText();
-                if ("opened".equals(action) || "synchronize".equals(action)) {
-                    String headSha = jsonPayload.path("pull_request").path("head").path("sha").asText();
+                if ("opened".equals(action) || "synchronize".equals(action) || "reopened".equals(action)) {
+                    int prNumber = jsonPayload.path("pull_request").path("number").asInt();
                     String owner = jsonPayload.path("repository").path("owner").path("login").asText();
                     String repo = jsonPayload.path("repository").path("name").asText();
-                    
-                    cicdService.triggerPipeline(installationId, owner, repo, headSha);
+                    String title = jsonPayload.path("pull_request").path("title").asText();
+                    String author = jsonPayload.path("pull_request").path("user").path("login").asText();
+
+                    log.info("Triggering Code Review Agent for PR {}/{} #{}", owner, repo, prNumber);
+
+                    try {
+                        String token = installationId != 0 ? gitHubAppService.getInstallationToken(installationId) : null;
+                        String diff = "";
+                        if (token != null) {
+                            diff = gitHubService.fetchPullRequestDiff(token, owner, repo, prNumber);
+                        } else {
+                            diff = "Unified diff for " + owner + "/" + repo + " PR #" + prNumber;
+                        }
+
+                        orchestratorService.runPullRequestReview(
+                                null, owner, repo, prNumber, diff, title, author, token
+                        );
+                    } catch (Exception ex) {
+                        log.error("Failed to run automated PR code review", ex);
+                    }
                 }
-            } else if ("installation".equals(eventType) || "installation_repositories".equals(eventType)) {
-                log.info("App installation event received");
+
+            // ── EVENT 3: WORKFLOW RUN (Pipeline Result -> Multi-Agent Loops) ─
+            } else if ("workflow_run".equals(eventType)) {
+                String action = jsonPayload.path("action").asText();
+                if ("completed".equals(action)) {
+                    String conclusion = jsonPayload.path("workflow_run").path("conclusion").asText();
+                    String owner = jsonPayload.path("repository").path("owner").path("login").asText();
+                    String repo = jsonPayload.path("repository").path("name").asText();
+                    String headSha = jsonPayload.path("workflow_run").path("head_sha").asText();
+                    String branch = jsonPayload.path("workflow_run").path("head_branch").asText("main");
+
+                    if ("failure".equalsIgnoreCase(conclusion)) {
+                        log.info("Workflow run FAILED for {}/{} — Triggering Self-Healing Loop (Log Analysis -> Pipeline Gen)", owner, repo);
+                        try {
+                            String simulatedLogs = "Workflow run failed at step 'build & test'. Exit code 1. Error: module not found or test assertion failure.";
+                            String failedYaml = "name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm test\n";
+                            orchestratorService.remediatePipeline(null, owner, repo, branch, failedYaml, simulatedLogs);
+                        } catch (Exception ex) {
+                            log.error("Failed self-healing pipeline remediation", ex);
+                        }
+
+                    } else if ("success".equalsIgnoreCase(conclusion)) {
+                        log.info("Workflow run SUCCESS for {}/{} — Triggering Deployment Agent", owner, repo);
+                        try {
+                            orchestratorService.executeDeployment(
+                                    null, owner, repo, headSha, "production", headSha.substring(0, Math.min(7, headSha.length())), false
+                            );
+                        } catch (Exception ex) {
+                            log.error("Failed automated deployment trigger", ex);
+                        }
+                    }
+                }
+
             } else {
                 log.info("Unhandled event type: {}", eventType);
             }

@@ -183,3 +183,143 @@ export async function getRepoContext(owner, repo, branch) {
   const branchQuery = branch ? `?branch=${encodeURIComponent(branch)}` : '';
   return apiFetch(`/repos/${owner}/${repo}/context${branchQuery}`);
 }
+
+// ==================== AI Agent APIs ====================
+
+/**
+ * Generate a CI/CD pipeline YAML for a repository.
+ */
+export async function generatePipeline(owner, repo, branch) {
+  return apiFetch('/agents/pipeline/generate', {
+    method: 'POST',
+    body: JSON.stringify({ owner, repo, branch }),
+  });
+}
+
+/**
+ * Run a code review on a repository.
+ */
+export async function runCodeReview(owner, repo, branch) {
+  return apiFetch('/agents/review/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ owner, repo, branch }),
+  });
+}
+
+/**
+ * Analyze pipeline logs for errors and root causes.
+ */
+export async function analyzeLogs(logText) {
+  return apiFetch('/agents/logs/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ log_text: logText }),
+  });
+}
+
+/**
+ * Generate a deployment plan for a repository.
+ */
+export async function generateDeploymentPlan(owner, repo, branch) {
+  return apiFetch('/agents/deploy/plan', {
+    method: 'POST',
+    body: JSON.stringify({ owner, repo, branch }),
+  });
+}
+
+/**
+ * Get pipeline generation history.
+ */
+export async function getPipelineHistory(owner, repo) {
+  const params = owner && repo ? `?owner=${owner}&repo=${repo}` : '';
+  return apiFetch(`/agents/pipeline/history${params}`);
+}
+
+/**
+ * Get code review history.
+ */
+export async function getReviewHistory() {
+  return apiFetch('/agents/review/history');
+}
+
+
+/**
+ * Multi-Agent Self-Healing Loop: Remediate failed CI/CD pipeline using logs.
+ */
+export async function remediatePipeline(owner, repo, branch, failedYaml, errorLogs) {
+  return apiFetch('/agents/pipeline/remediate', {
+    method: 'POST',
+    body: JSON.stringify({
+      owner,
+      repo,
+      branch,
+      failed_yaml: failedYaml,
+      error_logs: errorLogs,
+    }),
+  });
+}
+
+/**
+ * Run code review on a Pull Request diff.
+ */
+export async function runPullRequestReview(owner, repo, prNumber, diff, title, author) {
+  return apiFetch('/agents/review/pull-request', {
+    method: 'POST',
+    body: JSON.stringify({
+      owner,
+      repo,
+      pr_number: prNumber,
+      diff,
+      title,
+      author,
+    }),
+  });
+}
+
+/**
+ * Execute production deployment lifecycle (Docker -> Deploy -> Health Check -> Auto-rollback on fail).
+ */
+export async function executeDeployment(owner, repo, commitSha, environment = 'production', imageTag = null, simulateFailure = false) {
+  return apiFetch('/agents/deploy/execute', {
+    method: 'POST',
+    body: JSON.stringify({
+      owner,
+      repo,
+      commit_sha: commitSha,
+      environment,
+      image_tag: imageTag,
+      simulate_health_failure: simulateFailure,
+    }),
+  });
+}
+
+/**
+ * Rollback deployment to a previous version from Version History.
+ */
+export async function rollbackDeployment(owner, repo, targetVersion = null) {
+  return apiFetch('/agents/deploy/rollback', {
+    method: 'POST',
+    body: JSON.stringify({
+      owner,
+      repo,
+      target_version: targetVersion,
+    }),
+  });
+}
+
+/**
+ * Get deployment version history.
+ */
+export async function getDeploymentHistory(owner, repo) {
+  const params = owner && repo ? `?owner=${owner}&repo=${repo}` : '';
+  return apiFetch(`/agents/deploy/history${params}`);
+}
+
+/**
+ * Execute arbitrary multi-agent workflow on AI Orchestrator.
+ */
+export async function executeWorkflow(workflow, payload = {}) {
+  return apiFetch('/agents/orchestrator/workflow', {
+    method: 'POST',
+    body: JSON.stringify({ workflow, payload }),
+  });
+}

@@ -312,8 +312,9 @@ public class GitHubService {
         } catch (GithubApiException e) {
             if (e.getStatus() == HttpStatus.FORBIDDEN) {
                 throw new GithubApiException(HttpStatus.FORBIDDEN, 
-                    "GitHub 403 Forbidden: Your GitHub App needs 'Contents: Read & Write' permission. " +
-                    "Go to GitHub App Settings -> Permissions -> Repository permissions -> set Contents to 'Read & write', then approve updated permissions.");
+                    "GitHub 403 Forbidden: Pushing workflow files (.github/workflows/*) requires: " +
+                    "1) 'Contents: Read & write' and 'Workflows: Read & write' in GitHub App Permissions (Permissions -> Repository permissions). " +
+                    "2) Approve updated permissions in your GitHub App installation, then log out and log back in to refresh your OAuth token with the 'workflow' scope.");
             }
             throw e;
         }
@@ -579,5 +580,36 @@ public class GitHubService {
             }
         }
         return null;
+    }
+
+    public String fetchPullRequestDiff(String token, String owner, String repo, int pullNumber) {
+        try {
+            return this.githubApiClient.get()
+                    .uri("/repos/{owner}/{repo}/pulls/{pullNumber}", owner, repo, pullNumber)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .header(HttpHeaders.ACCEPT, "application/vnd.github.v3.diff")
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+        } catch (Exception e) {
+            log.error("Failed to fetch PR diff for {}/{} #{}", owner, repo, pullNumber, e);
+            throw new GithubApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to fetch PR diff: " + e.getMessage());
+        }
+    }
+
+    public void postPullRequestComment(String token, String owner, String repo, int pullNumber, String commentBody) {
+        try {
+            this.githubApiClient.post()
+                    .uri("/repos/{owner}/{repo}/issues/{pullNumber}/comments", owner, repo, pullNumber)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of("body", commentBody))
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block();
+            log.info("Posted AI review comment to {}/{} #{}", owner, repo, pullNumber);
+        } catch (Exception e) {
+            log.error("Failed to post PR comment to {}/{} #{}", owner, repo, pullNumber, e);
+        }
     }
 }
