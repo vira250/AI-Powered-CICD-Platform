@@ -1,9 +1,18 @@
 .log-input { padding: 24px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 14px; }
+.github-log-source { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(150px, 1fr)) auto; gap: 10px; align-items: end; padding-bottom: 16px; border-bottom: 1px solid var(--border-primary); }
+.github-log-source h3 { font-size: 1rem; color: var(--text-secondary); }
+.source-hint { margin-top: 4px; color: var(--text-tertiary); font-size: 0.78rem; }
+.source-select { min-width: 0; }
+@media (max-width: 1050px) { .github-log-source { grid-template-columns: 1fr 1fr; } .github-log-source > :first-child { grid-column: 1 / -1; } }
+@media (max-width: 600px) { .github-log-source { grid-template-columns: 1fr; } .github-log-source > :first-child { grid-column: auto; } }
 .log-input-header { display: flex; align-items: center; justify-content: space-between; }
 .log-input-header h3 { font-size: 1rem; color: var(--text-secondary); }
 .log-textarea { min-height: 200px; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.6; background: rgba(0,0,0,0.3); resize: vertical; }
 
 .log-result { display: flex; flex-direction: column; gap: 16px; }
+.log-evidence { padding: 20px; }
+.log-evidence h3 { margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 1rem; }
+.evidence-list { margin: 0; padding-left: 22px; color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.6; }
 
 .log-summary { padding: 24px; }
 .log-summary-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }

@@ -3,6 +3,7 @@ package com.cicd.platform.controller;
 import com.cicd.platform.model.User;
 import com.cicd.platform.service.AgentOrchestratorService;
 import com.cicd.platform.service.AuthenticatedUserResolver;
+import com.cicd.platform.service.LogAnalysisPersistenceService;
 import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,11 +21,14 @@ public class AgentController {
 
     private final AgentOrchestratorService orchestratorService;
     private final AuthenticatedUserResolver authenticatedUserResolver;
+    private final LogAnalysisPersistenceService logAnalysisPersistenceService;
 
     public AgentController(AgentOrchestratorService orchestratorService,
-                           AuthenticatedUserResolver authenticatedUserResolver) {
+                           AuthenticatedUserResolver authenticatedUserResolver,
+                           LogAnalysisPersistenceService logAnalysisPersistenceService) {
         this.orchestratorService = orchestratorService;
         this.authenticatedUserResolver = authenticatedUserResolver;
+        this.logAnalysisPersistenceService = logAnalysisPersistenceService;
     }
 
     /**
@@ -155,6 +159,89 @@ public class AgentController {
             log.error("Log analysis failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/logs/runs")
+    public ResponseEntity<?> listWorkflowRuns(HttpSession session,
+                                               @RequestParam String owner,
+                                               @RequestParam String repo) {
+        try {
+            User user = authenticatedUserResolver.resolve(session);
+            return ResponseEntity.ok(orchestratorService.listWorkflowRuns(user, owner, repo));
+        } catch (Exception e) {
+            log.error("Unable to load GitHub Actions runs", e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/logs/runs/{runId}/jobs")
+    public ResponseEntity<?> listWorkflowJobs(HttpSession session,
+                                               @RequestParam String owner,
+                                               @RequestParam String repo,
+                                               @PathVariable long runId) {
+        try {
+            User user = authenticatedUserResolver.resolve(session);
+            return ResponseEntity.ok(orchestratorService.listWorkflowJobs(user, owner, repo, runId));
+        } catch (Exception e) {
+            log.error("Unable to load GitHub Actions jobs", e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/logs/analyze-job")
+    public ResponseEntity<?> analyzeWorkflowJobLogs(HttpSession session, @RequestBody Map<String, Object> body) {
+        try {
+            User user = authenticatedUserResolver.resolve(session);
+            String owner = (String) body.get("owner");
+            String repo = (String) body.get("repo");
+            Object rawJobId = body.get("job_id");
+            Long jobId = null;
+            if (rawJobId instanceof Number number) {
+                jobId = number.longValue();
+            } else if (rawJobId instanceof String value && !value.isBlank()) {
+                try {
+                    jobId = Long.valueOf(value);
+                } catch (NumberFormatException ignored) {
+                    // Handled by the validation response below.
+                }
+            }
+            if (owner == null || repo == null || jobId == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "owner, repo, and job_id are required"));
+            }
+            return ResponseEntity.ok(orchestratorService.analyzeWorkflowJobLogs(user, owner, repo, jobId));
+        } catch (Exception e) {
+            log.error("GitHub Actions log analysis failed", e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/pipeline/{pipelineRunId}/log-analysis")
+    public ResponseEntity<?> getPipelineLogAnalysis(HttpSession session, @PathVariable long pipelineRunId) {
+        try {
+            User user = authenticatedUserResolver.resolve(session);
+            return ResponseEntity.ok(orchestratorService.getPipelineLogAnalysis(user.getId(), pipelineRunId));
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", exception.getMessage()));
+        } catch (Exception exception) {
+            log.error("Unable to load automatic pipeline log analysis", exception);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", exception.getMessage()));
+        }
+    }
+
+    @GetMapping("/logs/analysis")
+    public ResponseEntity<?> getLatestLogAnalysis(HttpSession session,
+                                                  @RequestParam String owner,
+                                                  @RequestParam String repo,
+                                                  @RequestParam(name = "run_id") long runId,
+                                                  @RequestParam(name = "job_id") long jobId) {
+        try {
+            authenticatedUserResolver.resolve(session);
+            return ResponseEntity.ok(logAnalysisPersistenceService.findLatest(owner, repo, runId, jobId)
+                    .orElseGet(Map::of));
+        } catch (Exception e) {
+            log.error("Unable to load saved GitHub Actions log analysis", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
         }
     }
 

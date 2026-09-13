@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FiFileText, FiPlay, FiAlertTriangle, FiTarget, FiTool,
   FiActivity, FiZap, FiCopy, FiCheckCircle, FiCheck, FiCode
 } from 'react-icons/fi';
-import { analyzeLogs, remediatePipeline } from '../api/github';
+import { analyzeLogs, analyzeWorkflowJob, getImportedRepos, getSavedWorkflowJobAnalysis, getWorkflowJobs, getWorkflowRuns, remediatePipeline } from '../api/github';
 import DashboardLayout from '../components/DashboardLayout';
 import './LogAnalysisPage.css';
 
@@ -30,11 +30,113 @@ export default function LogAnalysisPage({ user }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [repos, setRepos] = useState([]);
+  const [selectedRepo, setSelectedRepo] = useState(null);
+  const [runs, setRuns] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [loadingJobs, setLoadingJobs] = useState(false);
 
   // Self-healing state
   const [remediating, setRemediating] = useState(false);
   const [healedResult, setHealedResult] = useState(null);
   const [copiedYaml, setCopiedYaml] = useState(false);
+
+  useEffect(() => {
+    getImportedRepos()
+      .then((data) => setRepos(Array.isArray(data) ? data : []))
+      .catch(() => setRepos([]));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedRepo || !selectedRun || !selectedJob) return undefined;
+
+    let attempts = 0;
+    let cancelled = false;
+    const pollSavedAnalysis = async () => {
+      try {
+        const saved = await getSavedWorkflowJobAnalysis(
+          selectedRepo.owner,
+          selectedRepo.name,
+          selectedRun,
+          selectedJob,
+        );
+        if (!cancelled && saved && Object.keys(saved).length > 0) {
+          setResult(saved);
+          return true;
+        }
+      } catch {
+        // The webhook result may not be persisted yet.
+      }
+      return false;
+    };
+
+    const poll = async () => {
+      if (await pollSavedAnalysis()) return;
+      attempts += 1;
+      if (attempts >= 8 || cancelled) return;
+      window.setTimeout(poll, 2000);
+    };
+    poll();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRepo, selectedRun, selectedJob]);
+
+  async function loadRuns(repo) {
+    setSelectedRepo(repo);
+    setSelectedRun(null);
+    setSelectedJob(null);
+    setJobs([]);
+    if (!repo) {
+      setRuns([]);
+      return;
+    }
+    setLoadingRuns(true);
+    setError(null);
+    try {
+      const data = await getWorkflowRuns(repo.owner, repo.name);
+      setRuns(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setRuns([]);
+      setError(err.message || 'Unable to load GitHub Actions runs');
+    } finally {
+      setLoadingRuns(false);
+    }
+  }
+
+  async function loadJobs(runId) {
+    setSelectedRun(runId);
+    setSelectedJob(null);
+    setLoadingJobs(true);
+    setError(null);
+    try {
+      const data = await getWorkflowJobs(selectedRepo.owner, selectedRepo.name, runId);
+      setJobs(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setJobs([]);
+      setError(err.message || 'Unable to load workflow jobs');
+    } finally {
+      setLoadingJobs(false);
+    }
+  }
+
+  async function handleAnalyzeJob() {
+    if (!selectedRepo || !selectedJob) return;
+    setAnalyzing(true);
+    setResult(null);
+    setError(null);
+    try {
+      setResult(await analyzeWorkflowJob(selectedRepo.owner, selectedRepo.name, selectedJob));
+    } catch (err) {
+      setError(err.message || 'GitHub Actions log analysis failed');
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   async function handleAnalyze() {
     if (!logText.trim()) return;
@@ -100,6 +202,27 @@ export default function LogAnalysisPage({ user }) {
 
       {/* Log Input */}
       <section className="log-input glass-card animate-fade-in delay-1">
+        <div className="github-log-source">
+          <div>
+            <h3>Analyze a GitHub Actions job</h3>
+            <p className="source-hint">Fetch the selected job log securely through the backend.</p>
+          </div>
+          <select className="input source-select" value={selectedRepo?.id || ''} onChange={(e) => loadRuns(repos.find((repo) => String(repo.id) === e.target.value))}>
+            <option value="">Select imported repository</option>
+            {repos.map((repo) => <option key={repo.id} value={repo.id}>{repo.owner}/{repo.name}</option>)}
+          </select>
+          <select className="input source-select" value={selectedRun || ''} onChange={(e) => loadJobs(e.target.value)} disabled={!selectedRepo || loadingRuns}>
+            <option value="">{loadingRuns ? 'Loading runs...' : 'Select workflow run'}</option>
+            {runs.map((run) => <option key={run.id} value={run.id}>{run.name} · {run.conclusion || run.status} · {run.head_branch}</option>)}
+          </select>
+          <select className="input source-select" value={selectedJob || ''} onChange={(e) => { const jobId = e.target.value ? Number(e.target.value) : null; setSelectedJob(jobId); setResult(null); }} disabled={!selectedRun || loadingJobs}>
+            <option value="">{loadingJobs ? 'Loading jobs...' : 'Select failed job'}</option>
+            {jobs.map((job) => <option key={job.id} value={job.id}>{job.name} · {job.conclusion || job.status}</option>)}
+          </select>
+          <button className="btn btn-secondary" onClick={handleAnalyzeJob} disabled={!selectedJob || analyzing} type="button">
+            <FiActivity size={16} /> Analyze GitHub Job
+          </button>
+        </div>
         <div className="log-input-header">
           <h3>CI/CD Pipeline Failure Logs</h3>
           <button className="btn btn-ghost btn-sm" onClick={loadSample} type="button">
@@ -152,14 +275,40 @@ export default function LogAnalysisPage({ user }) {
               <span className="log-time">{result.generation_time_ms}ms</span>
             </div>
 
-            <p className="log-summary-text">{result.log_summary}</p>
+            <p className="log-summary-text">{result.summary || result.log_summary}</p>
 
             <div className="log-stats">
+              <span className="stat-chip">Type: <strong>{result.error_type || 'UNKNOWN_ERROR'}</strong></span>
               <span className="stat-chip"><strong>{result.error_count || result.errors?.length || 0}</strong> errors detected</span>
               <span className="stat-chip"><strong>{confidencePercent}%</strong> diagnosis confidence</span>
-              <span className="stat-chip">Impact: <strong>{result.impact?.severity?.toUpperCase() || 'HIGH'}</strong></span>
+              <span className="stat-chip">Severity: <strong>{(result.severity || result.impact?.severity || 'HIGH').toUpperCase()}</strong></span>
             </div>
           </div>
+
+          {(result.failed_job || result.failed_step || result.evidence?.length > 0) && (
+            <div className="log-evidence glass-card">
+              <h3><FiActivity size={18} /> Failure Evidence</h3>
+              {(result.failed_job || result.failed_step) && (
+                <p className="log-summary-text">
+                  {result.failed_job ? `Job: ${result.failed_job}` : ''}
+                  {result.failed_job && result.failed_step ? ' | ' : ''}
+                  {result.failed_step ? `Step: ${result.failed_step}` : ''}
+                </p>
+              )}
+              {result.evidence?.length > 0 && (
+                <ul className="evidence-list">
+                  {result.evidence.map((item, index) => <li key={index}>{item}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {result.root_cause && (
+            <div className="log-root-causes glass-card">
+              <h3><FiTarget size={18} /> Likely Root Cause</h3>
+              <p className="log-summary-text">{result.root_cause}</p>
+            </div>
+          )}
 
           {/* MULTI-AGENT SELF-HEALING BANNER */}
           <div className="self-healing-banner glass-card">

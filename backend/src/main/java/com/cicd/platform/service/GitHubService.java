@@ -19,6 +19,13 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import reactor.core.publisher.Mono;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -221,6 +228,121 @@ public class GitHubService {
                 .header(HttpHeaders.AUTHORIZATION, bearer(accessToken)));
     }
 
+    public List<Map<String, Object>> listWorkflowRuns(User user, String owner, String repoName) {
+        String accessToken = getActionsAccessToken(user);
+        JsonNode response = fetchJsonNode(githubApiClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/repos/{owner}/{repo}/actions/runs")
+                        .queryParam("per_page", MAX_PER_PAGE).build(owner, repoName))
+                .header(HttpHeaders.AUTHORIZATION, bearer(accessToken)));
+        List<Map<String, Object>> runs = new ArrayList<>();
+        if (response != null && response.path("workflow_runs").isArray()) {
+            for (JsonNode run : response.path("workflow_runs")) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", run.path("id").asLong());
+                item.put("name", run.path("name").asText("Workflow"));
+                item.put("status", run.path("status").asText("unknown"));
+                item.put("conclusion", jsonText(run.path("conclusion")));
+                item.put("head_branch", run.path("head_branch").asText(""));
+                item.put("head_sha", run.path("head_sha").asText(""));
+                // This identifies the workflow file that created the run, for example
+                // .github/workflows/ci.yml@refs/heads/main.
+                item.put("path", run.path("path").asText(""));
+                item.put("created_at", run.path("created_at").asText(""));
+                item.put("updated_at", run.path("updated_at").asText(""));
+                runs.add(item);
+            }
+        }
+        return runs;
+    }
+
+    public List<Map<String, Object>> listWorkflowJobs(User user, String owner, String repoName, long runId) {
+        String accessToken = getActionsAccessToken(user);
+        JsonNode response = fetchJsonNode(githubApiClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/repos/{owner}/{repo}/actions/runs/{runId}/jobs")
+                        .queryParam("per_page", 100).build(owner, repoName, runId))
+                .header(HttpHeaders.AUTHORIZATION, bearer(accessToken)));
+        List<Map<String, Object>> jobs = new ArrayList<>();
+        if (response != null && response.path("jobs").isArray()) {
+            for (JsonNode job : response.path("jobs")) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", job.path("id").asLong());
+                item.put("name", job.path("name").asText("Job"));
+                item.put("status", job.path("status").asText("unknown"));
+                item.put("conclusion", jsonText(job.path("conclusion")));
+                item.put("started_at", job.path("started_at").asText(""));
+                item.put("completed_at", job.path("completed_at").asText(""));
+                item.put("steps", objectMapper.convertValue(job.path("steps"), List.class));
+                jobs.add(item);
+            }
+        }
+        return jobs;
+    }
+
+    public String getWorkflowJobLogs(User user, String owner, String repoName, long jobId) {
+        String accessToken = getActionsAccessToken(user);
+        byte[] archive = githubApiClient.get()
+                .uri("/repos/{owner}/{repo}/actions/jobs/{jobId}/logs", owner, repoName, jobId)
+                .header(HttpHeaders.AUTHORIZATION, bearer(accessToken))
+                .exchangeToMono(response -> {
+                    if (response.statusCode().is3xxRedirection()) {
+                        URI location = response.headers().asHttpHeaders().getLocation();
+                        if (location == null) {
+                            return Mono.error(new GithubApiException(HttpStatus.BAD_GATEWAY,
+                                    "GitHub returned a log redirect without a location"));
+                        }
+                        return WebClient.builder().build().get()
+                                .uri(location)
+                                .retrieve()
+                                .bodyToMono(byte[].class);
+                    }
+                    return response.bodyToMono(byte[].class);
+                })
+                .block();
+        if (archive == null || archive.length == 0) {
+            throw new GithubApiException(HttpStatus.NOT_FOUND, "GitHub returned an empty job log archive");
+        }
+        return decodeJobLogs(archive);
+    }
+
+    private String getActionsAccessToken(User user) {
+        boolean isInstallation = user.getInstallationId() != null;
+        return isInstallation ? gitHubAppService.getInstallationToken(user.getInstallationId()) : requireAccessToken(user);
+    }
+
+    private String unzipLogs(byte[] archive) {
+        StringBuilder logs = new StringBuilder();
+        try (InputStream input = new ByteArrayInputStream(archive); ZipInputStream zip = new ZipInputStream(input)) {
+            ZipEntry entry;
+            byte[] buffer = new byte[8192];
+            while ((entry = zip.getNextEntry()) != null) {
+                if (!entry.isDirectory()) {
+                    int read;
+                    while ((read = zip.read(buffer)) != -1 && logs.length() < 120_000) {
+                        logs.append(new String(buffer, 0, Math.min(read, 120_000 - logs.length()), StandardCharsets.UTF_8));
+                    }
+                    logs.append('\n');
+                }
+                zip.closeEntry();
+            }
+        } catch (IOException exception) {
+            throw new GithubApiException(HttpStatus.BAD_GATEWAY, "Unable to read GitHub job log archive");
+        }
+        return logs.toString();
+    }
+
+    private String decodeJobLogs(byte[] archive) {
+        // GitHub's job-log endpoint redirects to a plain-text file. Keep ZIP support
+        // for compatibility with older responses or alternate GitHub hosts.
+        if (archive.length < 4
+                || archive[0] != 'P'
+                || archive[1] != 'K'
+                || archive[2] != 3
+                || archive[3] != 4) {
+            return new String(archive, StandardCharsets.UTF_8);
+        }
+        return unzipLogs(archive);
+    }
+
     public Map<String, Object> pushFile(User user, String owner, String repo,
                                         String path, String content, String commitMessage,
                                         String branch) {
@@ -409,6 +531,17 @@ public class GitHubService {
         return fetchJsonNode(githubApiClient.get()
                 .uri("/user")
                 .header(HttpHeaders.AUTHORIZATION, bearer(accessToken)));
+    }
+
+    /**
+     * Jackson's {@code asText(null)} turns JSON null into the literal string
+     * {@code "null"}, which made job-conclusion filters miss real failed jobs.
+     */
+    static String jsonText(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return "";
+        }
+        return node.asText("");
     }
 
     public JsonNode fetchJsonNode(WebClient.RequestHeadersSpec<?> request) {

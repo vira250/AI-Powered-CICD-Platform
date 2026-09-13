@@ -30,3 +30,8 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/

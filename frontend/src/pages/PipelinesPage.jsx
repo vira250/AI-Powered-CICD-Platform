@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { 
   FiGitBranch, FiPlay, FiCheck, FiAlertTriangle, FiCopy, FiUploadCloud, 
-  FiClock, FiCode, FiShield, FiCpu, FiLayers, FiRefreshCw, FiCheckCircle, FiXCircle 
+  FiClock, FiCode, FiShield, FiCpu, FiLayers, FiRefreshCw, FiCheckCircle, FiXCircle, FiActivity
 } from 'react-icons/fi';
-import { getImportedRepos, generatePipeline, pushFile, getPipelineHistory } from '../api/github';
+import { getImportedRepos, generatePipeline, getPipelineLogAnalysis, pushFile, getPipelineHistory } from '../api/github';
 import DashboardLayout from '../components/DashboardLayout';
 import './PipelinesPage.css';
 
@@ -18,11 +18,39 @@ export default function PipelinesPage({ user }) {
   const [history, setHistory] = useState([]);
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState('yaml'); // 'yaml' | 'validator' | 'planner' | 'architecture'
+  const [automaticAnalysis, setAutomaticAnalysis] = useState(null);
 
   useEffect(() => {
     loadRepos();
     loadHistory();
   }, []);
+
+  useEffect(() => {
+    const pipelineRunId = result?.pipeline_run_id;
+    if (!pipelineRunId) return undefined;
+
+    let cancelled = false;
+    let timer;
+    const poll = async () => {
+      try {
+        const data = await getPipelineLogAnalysis(pipelineRunId);
+        if (cancelled) return;
+        setAutomaticAnalysis(data);
+        if (!['completed', 'completed_with_errors', 'error', 'timed_out', 'no_relevant_jobs'].includes(data.status)) {
+          timer = window.setTimeout(poll, 3000);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setAutomaticAnalysis({ status: 'error', message: err.message || 'Unable to load automatic log analysis' });
+        }
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [result?.pipeline_run_id]);
 
   async function loadRepos() {
     try {
@@ -51,6 +79,7 @@ export default function PipelinesPage({ user }) {
     if (!selectedRepo) return;
     setGenerating(true);
     setResult(null);
+    setAutomaticAnalysis(null);
     setError(null);
     setPushDone(false);
     try {
@@ -129,7 +158,7 @@ export default function PipelinesPage({ user }) {
             <button
               key={repo.id}
               className={`repo-select-card ${selectedRepo?.id === repo.id ? 'selected' : ''}`}
-              onClick={() => { setSelectedRepo(repo); setResult(null); setError(null); setPushDone(false); }}
+              onClick={() => { setSelectedRepo(repo); setResult(null); setAutomaticAnalysis(null); setError(null); setPushDone(false); }}
               type="button"
             >
               <span className="repo-select-name">{repo.name}</span>
@@ -209,6 +238,37 @@ export default function PipelinesPage({ user }) {
               </div>
             </div>
           </div>
+
+          {(result.auto_pushed || automaticAnalysis) && (
+            <div className={`automatic-analysis glass-card ${automaticAnalysis?.status || 'queued'}`}>
+              <div className="automatic-analysis-heading">
+                <FiActivity size={18} />
+                <div>
+                  <h3>Automatic GitHub Actions Log Analysis</h3>
+                  <p>{automaticAnalysis?.message || 'Queued after the generated workflow was pushed to GitHub.'}</p>
+                </div>
+                <span className="history-status status-generating">{(automaticAnalysis?.status || result.log_analysis_status || 'queued').replaceAll('_', ' ')}</span>
+              </div>
+              {automaticAnalysis?.workflow_conclusion && (
+                <p className="automatic-analysis-meta">Workflow result: <strong>{automaticAnalysis.workflow_conclusion}</strong></p>
+              )}
+              {automaticAnalysis?.analysis && (
+                <div className="automatic-analysis-result">
+                  <div className={`check-status ${automaticAnalysis.analysis.status === 'passed' ? 'check-pass' : 'check-fail'}`}>
+                    {automaticAnalysis.analysis.status === 'passed' ? <FiCheckCircle size={16} /> : <FiAlertTriangle size={16} />}
+                    <span>{(automaticAnalysis.analysis.status || 'completed').replaceAll('_', ' ')}</span>
+                  </div>
+                  <p>{automaticAnalysis.analysis.summary || automaticAnalysis.analysis.log_summary}</p>
+                  <div className="strategy-chips">
+                    <span className="chip">Type: {automaticAnalysis.analysis.error_type || 'UNKNOWN_ERROR'}</span>
+                    <span className="chip">Severity: {automaticAnalysis.analysis.severity || 'low'}</span>
+                    <span className="chip">Confidence: {Math.round((automaticAnalysis.analysis.confidence_score || 0) * 100)}%</span>
+                  </div>
+                  {automaticAnalysis.analysis.root_cause && <p className="automatic-analysis-root"><strong>Root cause:</strong> {automaticAnalysis.analysis.root_cause}</p>}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Navigation Tabs */}
           <div className="result-tabs">

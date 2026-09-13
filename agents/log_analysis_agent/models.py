@@ -1,6 +1,6 @@
 """Pydantic models for the Log Analysis Agent output."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 
@@ -26,7 +26,7 @@ class SuggestedFix(BaseModel):
 
 class ImpactAnalysis(BaseModel):
     severity: str  # critical, high, medium, low
-    affected_areas: list[str] = []
+    affected_areas: list[str] = Field(default_factory=list)
     description: str = ""
 
 
@@ -35,11 +35,20 @@ class LogAnalysisResult(BaseModel):
     generated_at: str
     log_summary: str
     status: str  # "failed", "passed_with_warnings", "passed"
+    # Compatibility fields used by the Log Analyzer UI and downstream agents.
+    error_type: str = "UNKNOWN_ERROR"
+    severity: str = "low"
+    summary: str = ""
+    root_cause: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    failed_job: Optional[str] = None
+    failed_step: Optional[str] = None
     error_count: int = 0
     warning_count: int = 0
-    errors: list[ErrorEntry] = []
-    root_causes: list[RootCause] = []
-    suggested_fixes: list[SuggestedFix] = []
-    impact: ImpactAnalysis = ImpactAnalysis(severity="low", description="No impact")
+    errors: list[ErrorEntry] = Field(default_factory=list)
+    root_causes: list[RootCause] = Field(default_factory=list)
+    suggested_fixes: list[SuggestedFix] = Field(default_factory=list)
+    impact: ImpactAnalysis = Field(default_factory=lambda: ImpactAnalysis(severity="low", description="No impact"))
     confidence_score: float = 0.0
-    model: dict = {}
+    confidence: float = 0.0
+    model: dict = Field(default_factory=dict)

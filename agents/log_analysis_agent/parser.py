@@ -6,6 +6,57 @@ Classifies log sections into build, test, security, and deployment categories.
 import re
 from log_analysis_agent.models import ErrorEntry
 
+MAX_LOG_CHARS = 12000
+FAILURE_PATTERNS = [
+    ("COMPILATION_ERROR", [
+        r"\bTS\d{4}\b",
+        r"TypeScript compiler",
+    ]),
+    ("DEPENDENCY_ERROR", [
+        r"npm\s+err!", r"eresolve", r"could not resolve", r"could not be resolved", r"unable to resolve",
+        r"module(?:notfound| not found)", r"importerror", r"no matching distribution",
+        r"failed to install", r"dependency(?:ies)? .* not found",
+    ]),
+    ("DOCKER_ERROR", [
+        r"docker (?:build|daemon|image|pull)", r"dockerfile", r"container .* failed",
+        r"failed to build image", r"manifest unknown",
+    ]),
+    ("COMPILATION_ERROR", [
+        r"compilation (?:error|failed)", r"cannot find symbol", r"compile failed",
+        r"ts\d{4}", r"syntaxerror", r"build failed", r"error:.* at .*:\d+:\d+",
+    ]),
+    ("DEPLOYMENT_ERROR", [
+        r"deploy(?:ment)?\s+failed", r"kubectl", r"helm .* failed", r"rollout failed",
+        r"release .* failed", r"failed to deploy",
+    ]),
+    ("TEST_FAILURE", [
+        r"tests?\s+(?:failed|failure)", r"assertion(?:error|.*failed)",
+        r"(?:^|\s)fail(?:ed)?\s+\S+", r"pytest.*failed", r"junit.*failure",
+    ]),
+    ("LINT_FAILURE", [
+        r"lint(?:ing)?", r"eslint", r"flake8", r"pylint", r"checkstyle",
+        r"prettier.*(?:error|failed)", r"style check failed",
+    ]),
+    ("CONFIGURATION_ERROR", [
+        r"configuration (?:error|invalid|missing)", r"missing required (?:env|environment|variable)",
+        r"environment variable .* (?:not set|missing)", r"invalid (?:configuration|yaml)",
+        r"config(?:uration)? key .* not found",
+    ]),
+    ("AUTHENTICATION_ERROR", [
+        r"permission denied", r"unauthori[sz]ed", r"forbidden", r"\b(?:401|403)\b",
+        r"invalid credentials", r"authentication failed", r"access denied",
+    ]),
+    ("NETWORK_ERROR", [
+        r"connection refused", r"network (?:error|unreachable)", r"timed? out", r"timeout",
+        r"dns", r"could not resolve host", r"unable to access",
+    ]),
+]
+SECRET_PATTERNS = [
+    (r"(?i)(Authorization:\s*Bearer\s+)[^\s]+", r"\1[REDACTED]"),
+    (r"(?i)(token|password|passwd|secret|api[_-]?key)(\s*[=:]\s*)[^\s]+", r"\1\2[REDACTED]"),
+    (r"gh[pousr]_[A-Za-z0-9_]+", "[REDACTED_GITHUB_TOKEN]"),
+]
+
 # Patterns that indicate errors in CI/CD logs
 ERROR_PATTERNS = [
     (r"(?i)^error[:\s](.+)", "general"),
@@ -56,7 +107,8 @@ def parse_logs(log_text: str) -> dict:
             "exit_code": int | None,
         }
     """
-    lines = log_text.strip().split("\n")
+    cleaned_log = redact_secrets((log_text or "")[:MAX_LOG_CHARS])
+    lines = cleaned_log.strip().split("\n") if cleaned_log.strip() else []
     errors: list[ErrorEntry] = []
     warnings: list[str] = []
     seen_errors: set[str] = set()
@@ -87,11 +139,11 @@ def parse_logs(log_text: str) -> dict:
                 break
 
     # Detect stack traces
-    has_stack_trace = bool(re.search(r"(?i)(at\s+[\w.$]+\(|traceback|stack trace)", log_text))
+    has_stack_trace = bool(re.search(r"(?i)(at\s+[\w.$]+\(|traceback|stack trace)", cleaned_log))
 
     # Detect exit code
     exit_code = None
-    exit_match = re.search(r"(?i)(?:exit|return|exited with)\s*(?:code|status)?\s*(\d+)", log_text)
+    exit_match = re.search(r"(?i)(?:exit|return|exited with)\s*(?:code|status)?\s*(\d+)", cleaned_log)
     if exit_match:
         exit_code = int(exit_match.group(1))
 
@@ -102,4 +154,37 @@ def parse_logs(log_text: str) -> dict:
         "warning_count": len(warnings),
         "has_stack_trace": has_stack_trace,
         "exit_code": exit_code,
+        "cleaned_log": cleaned_log,
+        "failure_type": classify_failure(cleaned_log),
+        "failed_job": extract_named_value(cleaned_log, r"(?im)^job(?: name)?\s*[:=]\s*(.+)$"),
+        "failed_step": extract_step(cleaned_log),
     }
+
+
+def redact_secrets(log_text: str) -> str:
+    """Remove common credentials before logs are sent to the language model."""
+    redacted = log_text
+    for pattern, replacement in SECRET_PATTERNS:
+        redacted = re.sub(pattern, replacement, redacted)
+    return redacted
+
+
+def classify_failure(log_text: str) -> str:
+    """Return the first high-signal CI/CD failure class found in sanitized logs."""
+    for failure_type, patterns in FAILURE_PATTERNS:
+        if any(re.search(pattern, log_text, re.IGNORECASE) for pattern in patterns):
+            return failure_type
+    return "UNKNOWN_ERROR"
+
+
+def extract_named_value(log_text: str, pattern: str) -> str | None:
+    match = re.search(pattern, log_text)
+    return match.group(1).strip()[:200] if match else None
+
+
+def extract_step(log_text: str) -> str | None:
+    for pattern in (r"(?im)^##\[group\]Run\s+(.+)$", r"(?im)^step\s*[:=]\s*(.+)$"):
+        value = extract_named_value(log_text, pattern)
+        if value:
+            return value
+    return None

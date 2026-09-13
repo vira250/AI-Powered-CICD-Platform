@@ -216,6 +216,35 @@ export async function analyzeLogs(logText) {
   });
 }
 
+export async function getWorkflowRuns(owner, repo) {
+  return apiFetch(`/agents/logs/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`);
+}
+
+export async function getWorkflowJobs(owner, repo, runId) {
+  return apiFetch(`/agents/logs/runs/${runId}/jobs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`);
+}
+
+export async function analyzeWorkflowJob(owner, repo, jobId) {
+  return apiFetch('/agents/logs/analyze-job', {
+    method: 'POST',
+    body: JSON.stringify({ owner, repo, job_id: jobId }),
+  });
+}
+
+export async function getSavedWorkflowJobAnalysis(owner, repo, runId, jobId) {
+  const params = new URLSearchParams({
+    owner,
+    repo,
+    run_id: String(runId),
+    job_id: String(jobId),
+  });
+  return apiFetch(`/agents/logs/analysis?${params.toString()}`);
+}
+
+export async function getPipelineLogAnalysis(pipelineRunId) {
+  return apiFetch(`/agents/pipeline/${encodeURIComponent(pipelineRunId)}/log-analysis`);
+}
+
 /**
  * Generate a deployment plan for a repository.
  */

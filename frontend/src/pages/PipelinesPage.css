@@ -18,6 +18,17 @@
 
 /* Architecture Stepper Bar */
 .pipeline-stepper { padding: 20px; margin-bottom: 16px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(99,102,241,0.25); border-radius: var(--radius-lg); }
+.automatic-analysis { padding: 20px; margin-bottom: 16px; border: 1px solid rgba(99,102,241,0.25); }
+.automatic-analysis.completed { border-color: rgba(16,185,129,0.35); }
+.automatic-analysis.error, .automatic-analysis.timed_out { border-color: rgba(239,68,68,0.35); }
+.automatic-analysis-heading { display: flex; align-items: center; gap: 12px; }
+.automatic-analysis-heading > svg { color: var(--accent-primary); }
+.automatic-analysis-heading h3 { font-size: 1rem; margin: 0 0 4px; }
+.automatic-analysis-heading p { margin: 0; color: var(--text-secondary); font-size: 0.82rem; }
+.automatic-analysis-heading .history-status { margin-left: auto; }
+.automatic-analysis-meta, .automatic-analysis-root { color: var(--text-secondary); font-size: 0.82rem; margin: 14px 0 0; }
+.automatic-analysis-result { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); }
+.automatic-analysis-result p { margin: 8px 0; color: var(--text-secondary); }
 .stepper-title { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 0.95rem; margin-bottom: 16px; color: var(--text-primary); }
 .badge-feedback-loop { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--radius-full); font-size: 0.75rem; background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); font-weight: 600; margin-left: 12px; }
 .spin-icon { animation: spin 3s linear infinite; }

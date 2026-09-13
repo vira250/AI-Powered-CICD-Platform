@@ -20,10 +20,10 @@ github:
   app:
     id: "${GITHUB_APP_ID:4525940}"
     private-key-path: "${GITHUB_PRIVATE_KEY_PATH:classpath:github-private-key.pem}"
-    webhook-secret: "${GITHUB_WEBHOOK_SECRET:my-super-secret-webhook-key}"
+    webhook-secret: "${GITHUB_WEBHOOK_SECRET:}"
   client:
-    id: "${GITHUB_CLIENT_ID:Iv23liRMFwpeBR8IrWYa}"
-    secret: "${GITHUB_CLIENT_SECRET:1d35b1378bfb715c4ea83d612c2b434378d9ea24}"
+    id: "${GITHUB_CLIENT_ID:}"
+    secret: "${GITHUB_CLIENT_SECRET:}"
   redirect:
     uri: "${GITHUB_REDIRECT_URI:http://localhost:5173/api/auth/github/callback}"
   oauth:
@@ -40,6 +40,9 @@ app:
   repository-context:
     max-payload-bytes: ${MAX_REPOSITORY_CONTEXT_BYTES:5242880}
     include-secrets: ${INCLUDE_SECRETS_IN_CONTEXT:false}
+  workflow-log-analysis:
+    poll-interval-ms: ${WORKFLOW_LOG_ANALYSIS_POLL_INTERVAL_MS:5000}
+    max-poll-attempts: ${WORKFLOW_LOG_ANALYSIS_MAX_POLL_ATTEMPTS:120}
 
 logging:
   level:

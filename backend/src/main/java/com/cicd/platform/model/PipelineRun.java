@@ -41,6 +41,13 @@ public class PipelineRun {
     private boolean pushedToGithub;
     private String pushCommitSha;
 
+    // GitHub Actions execution created by the workflow commit pushed by this generation.
+    private Long workflowRunId;
+    private String workflowConclusion;
+    private Long logAnalysisJobId;
+    private String logAnalysisStatus;
+    private String logAnalysisMessage;
+
     private LocalDateTime createdAt;
     private LocalDateTime completedAt;
 
@@ -94,6 +101,21 @@ public class PipelineRun {
 
     public String getPushCommitSha() { return pushCommitSha; }
     public void setPushCommitSha(String pushCommitSha) { this.pushCommitSha = pushCommitSha; }
+
+    public Long getWorkflowRunId() { return workflowRunId; }
+    public void setWorkflowRunId(Long workflowRunId) { this.workflowRunId = workflowRunId; }
+
+    public String getWorkflowConclusion() { return workflowConclusion; }
+    public void setWorkflowConclusion(String workflowConclusion) { this.workflowConclusion = workflowConclusion; }
+
+    public Long getLogAnalysisJobId() { return logAnalysisJobId; }
+    public void setLogAnalysisJobId(Long logAnalysisJobId) { this.logAnalysisJobId = logAnalysisJobId; }
+
+    public String getLogAnalysisStatus() { return logAnalysisStatus; }
+    public void setLogAnalysisStatus(String logAnalysisStatus) { this.logAnalysisStatus = logAnalysisStatus; }
+
+    public String getLogAnalysisMessage() { return logAnalysisMessage; }
+    public void setLogAnalysisMessage(String logAnalysisMessage) { this.logAnalysisMessage = logAnalysisMessage; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
