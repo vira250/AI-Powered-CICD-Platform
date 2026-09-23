@@ -68,6 +68,49 @@ export async function logout() {
 }
 
 /**
+ * Sign up with email and password.
+ */
+export async function signUp(name, email, password) {
+  const data = await apiFetch('/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, password }),
+  });
+  if (data && data.token) {
+    setAuthToken(data.token);
+  }
+  return data;
+}
+
+/**
+ * Login with email and password.
+ */
+export async function loginWithEmail(email, password) {
+  const data = await apiFetch('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  if (data && data.token) {
+    setAuthToken(data.token);
+  }
+  return data;
+}
+
+/**
+ * Login/signup with Google OAuth.
+ * @param {string} credential - The Google ID token from Google Sign-In.
+ */
+export async function loginWithGoogle(credential) {
+  const data = await apiFetch('/auth/google', {
+    method: 'POST',
+    body: JSON.stringify({ credential }),
+  });
+  if (data && data.token) {
+    setAuthToken(data.token);
+  }
+  return data;
+}
+
+/**
  * Get the GitHub login URL (backend will redirect to GitHub).
  */
 export function getGitHubLoginUrl() {

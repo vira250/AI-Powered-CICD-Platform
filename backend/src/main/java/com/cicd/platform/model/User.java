@@ -11,14 +11,31 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true, nullable = false)
+    @Column(unique = true)
     private Long githubId;
 
     @Column(nullable = false)
     private String username;
 
     private String name;
+
+    @Column(unique = true)
     private String email;
+
+    @Column(columnDefinition = "TEXT")
+    private String passwordHash;
+
+    /**
+     * Authentication provider: LOCAL, GITHUB, GOOGLE
+     */
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'GITHUB'")
+    private String authProvider = "GITHUB";
+
+    @Column(columnDefinition = "boolean default false")
+    private boolean emailVerified = false;
+
+    @Column(unique = true)
+    private String googleId;
 
     @Column(columnDefinition = "TEXT")
     private String avatarUrl;
@@ -59,6 +76,18 @@ public class User {
 
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
+
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
+
+    public String getAuthProvider() { return authProvider; }
+    public void setAuthProvider(String authProvider) { this.authProvider = authProvider; }
+
+    public boolean isEmailVerified() { return emailVerified; }
+    public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
+
+    public String getGoogleId() { return googleId; }
+    public void setGoogleId(String googleId) { this.googleId = googleId; }
 
     public String getAvatarUrl() { return avatarUrl; }
     public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }

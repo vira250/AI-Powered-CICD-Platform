@@ -3,7 +3,7 @@
 import json
 import re
 import logging
-from typing import Optional
+from typing import Any, Optional
 from config import (
     GOOGLE_API_KEY, LLM_MODEL, LLM_TEMPERATURE, get_llm_provider
 )
@@ -14,10 +14,12 @@ logger = logging.getLogger("llm_client")
 def call_llm(
     system_prompt: str = "",
     user_prompt: str = "",
+    *,
     prompt: str = "",
     expect_json: bool = False,
     temperature: Optional[float] = None,
     max_output_tokens: Optional[int] = None,
+    timeout: Optional[float] = None,
     **kwargs
 ) -> str:
     """
@@ -38,7 +40,8 @@ def call_llm(
                 system_prompt,
                 user_prompt,
                 temperature=temperature,
-                max_output_tokens=max_output_tokens
+                max_output_tokens=max_output_tokens,
+                timeout=timeout,
             )
         except Exception as e:
             logger.warning(f"Gemini call failed ({e}), falling back to intelligent template.")
@@ -51,9 +54,10 @@ def _call_gemini(
     system_prompt: str,
     user_prompt: str,
     temperature: Optional[float] = None,
-    max_output_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None,
+    timeout: Optional[float] = None,
 ) -> str:
-    """Call Google Gemini API via official REST endpoint with failover models and 12s timeout."""
+    """Call Google Gemini API via official REST endpoint with failover models and configurable timeout."""
     import httpx
     import time
 
@@ -63,7 +67,7 @@ def _call_gemini(
     seen = set()
     candidate_models = [m for m in candidate_models if m and not (m in seen or seen.add(m))]
 
-    payload = {
+    payload: dict[str, Any] = {
         "contents": [
             {
                 "parts": [
@@ -81,28 +85,46 @@ def _call_gemini(
             "parts": [{"text": system_prompt}]
         }
 
+    effective_timeout = timeout if timeout is not None else 30.0
     last_error = None
-    with httpx.Client(timeout=12.0) as client:
-        for model_name in candidate_models:
+
+    def _redact(text: str) -> str:
+        """Strip any leaked API key fragments from error text."""
+        if GOOGLE_API_KEY and len(GOOGLE_API_KEY) > 4:
+            return text.replace(GOOGLE_API_KEY, "***REDACTED***")
+        return text
+
+    with httpx.Client(timeout=effective_timeout) as client:
+        for model_idx, model_name in enumerate(candidate_models):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GOOGLE_API_KEY}"
-            try:
-                response = client.post(url, json=payload)
-                if response.status_code == 200:
-                    data = response.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            return parts[0].get("text", "")
-                elif response.status_code in (503, 429):
-                    last_error = f"Model {model_name} busy (status {response.status_code})"
-                    time.sleep(0.5)
-                    continue
-                else:
-                    last_error = f"Gemini API error {response.status_code}: {response.text[:200]}"
-            except Exception as e:
-                last_error = str(e)
-                continue
+            # Retry with backoff on 429 for the primary model
+            max_retries = 3 if model_idx == 0 else 1
+            for attempt in range(max_retries):
+                try:
+                    response = client.post(url, json=payload)
+                    if response.status_code == 200:
+                        data = response.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts:
+                                return parts[0].get("text", "")
+                    elif response.status_code == 429:
+                        backoff = (attempt + 1) * 1.0  # 1s, 2s, 3s
+                        last_error = f"Model {model_name} rate-limited (429), retry {attempt + 1}/{max_retries}"
+                        logger.info(last_error)
+                        time.sleep(backoff)
+                        continue
+                    elif response.status_code == 503:
+                        last_error = f"Model {model_name} unavailable (503)"
+                        time.sleep(0.5)
+                        break  # move to next model
+                    else:
+                        last_error = f"Gemini API error {response.status_code}: {_redact(response.text[:200])}"
+                        break  # move to next model
+                except Exception as e:
+                    last_error = _redact(str(e))
+                    break  # move to next model
 
     raise RuntimeError(f"All Gemini models exhausted: {last_error}")
 

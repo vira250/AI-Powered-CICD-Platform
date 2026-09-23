@@ -1,0 +1,11 @@
+{
+  "include": [
+    "agents"
+  ],
+  "extraPaths": [
+    "agents",
+    "C:\\Users\\viraj\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages"
+  ],
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Windows"
+}

@@ -60,6 +60,18 @@ function AppShell() {
     }
   }
 
+  /**
+   * Called after successful email/password or Google auth.
+   * The API layer already stored the token; we just need to
+   * refresh user state and redirect.
+   */
+  function handleAuthSuccess(userData) {
+    if (userData) {
+      setUser(userData);
+      setRedirectTo('/dashboard');
+    }
+  }
+
   return (
     <>
       {redirectTo ? <Navigate to={redirectTo} replace /> : null}
@@ -74,7 +86,22 @@ function AppShell() {
           ) : user ? (
             <Navigate to="/dashboard" replace />
           ) : (
-            <LoginPage />
+            <LoginPage defaultTab="login" onAuthSuccess={handleAuthSuccess} />
+          )
+        }
+      />
+
+      <Route
+        path="/signup"
+        element={
+          loading ? (
+            <div className="loading-container" style={{ minHeight: '100vh' }}>
+              <div className="spinner spinner-lg"></div>
+            </div>
+          ) : user ? (
+            <Navigate to="/dashboard" replace />
+          ) : (
+            <LoginPage defaultTab="signup" onAuthSuccess={handleAuthSuccess} />
           )
         }
       />
@@ -156,4 +183,4 @@ function App() {
   );
 }
 
-export default App;
+export default App;

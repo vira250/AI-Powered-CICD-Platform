@@ -22,11 +22,11 @@ from llm_client import call_llm, extract_json_from_response
 from code_review_agent.parser import (
     format_directory_tree, format_file_contents, build_truncation_warning
 )
-from code_review_agent.diff_parser import parse_unified_diff, DiffFile
+from code_review_agent.diff_parser import parse_unified_diff
 from code_review_agent.static_analysis import run_static_analysis
 from code_review_agent.formatter import format_pr_comment
 from code_review_agent.models import (
-    ReviewResult, Finding, ReviewStats, Severity, Verdict, FindingCategory
+    ReviewResult, Finding, ReviewStats, Severity, Verdict
 )
 from config import LLM_MODEL
 
@@ -165,7 +165,8 @@ def _format_static_findings_for_prompt(findings: list[Finding]) -> str:
         return "None detected by static rules."
     lines = []
     for f in findings[:25]:  # limit to top 25 to preserve token budget
-        lines.append(f"- [{f.severity.upper()}] ({f.source}) {f.file}:{f.line or 1} - {f.title}: {f.description}")
+        sev = f.severity.value if isinstance(f.severity, Severity) else str(f.severity)
+        lines.append(f"- [{sev.upper()}] ({f.source}) {f.file}:{f.line or 1} - {f.title}: {f.description}")
     if len(findings) > 25:
         lines.append(f"... and {len(findings) - 25} more static findings.")
     return "\n".join(lines)
@@ -193,6 +194,7 @@ def _execute_llm_and_build_result(
             system_prompt=SYSTEM_PROMPT,
             temperature=0.2,
             max_output_tokens=4096,
+            timeout=45.0,
         )
         parsed = extract_json_from_response(raw_response)
         summary = parsed.get("summary", "Review completed.")
@@ -274,10 +276,10 @@ def _merge_findings(static_findings: list[Finding], llm_findings: list[Finding])
     seen_signatures = {(f.file, f.line, f.category) for f in llm_findings if f.line is not None}
 
     for sf in static_findings:
-        sig = (sf.file, sf.line, sf.category)
+        sig: tuple[str, int | None, str] = (sf.file, sf.line, sf.category)
         if sig not in seen_signatures:
             merged.append(sf)
             if sf.line is not None:
-                seen_signatures.add(sig)
+                seen_signatures.add((sf.file, sf.line, sf.category))
 
     return merged
