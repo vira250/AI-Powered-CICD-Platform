@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  web-app:
+    image: registry.internal.cloud/acme/acme-microservice:v1.0.0-stable
+    container_name: production-live-app
+    restart: always
+    ports:
+      - "8081:8080"
+    environment:
+      - ENV=production
+      - LOG_LEVEL=INFO
